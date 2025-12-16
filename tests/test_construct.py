@@ -72,11 +72,11 @@ class TestAssembleConstruct:
             Motif.from_string("AAG&CUU", "(.(&.))"),
         ]
         helices = [
-            Helix(strand1="AGC", strand2="GCU", structure1="(((", structure2=")))"),
-            Helix(strand1="UAG", strand2="CUA", structure1="(((", structure2=")))"),
-            Helix(strand1="GGC", strand2="GCC", structure1="(((", structure2=")))"),
+            Helix.from_sequences("AGC", "GCU", "(((", ")))"),
+            Helix.from_sequences("UAG", "CUA", "(((", ")))"),
+            Helix.from_sequences("GGC", "GCC", "(((", ")))"),
         ]
-        hairpin = Hairpin(sequence="GAAA", structure="....")
+        hairpin = Hairpin.from_sequence("GAAA", "....")
         return motifs, helices, hairpin
 
     def test_assemble_basic(self, assembly_components):
@@ -226,10 +226,10 @@ class TestAssembleConstructPositions:
         """Simple assembly for position testing."""
         motifs = [Motif.from_string("GAC&GC", "(.(&))")]
         helices = [
-            Helix(strand1="AA", strand2="UU", structure1="((", structure2="))"),
-            Helix(strand1="CC", strand2="GG", structure1="((", structure2="))"),
+            Helix.from_sequences("AA", "UU", "((", "))"),
+            Helix.from_sequences("CC", "GG", "((", "))"),
         ]
-        hairpin = Hairpin(sequence="GAAA", structure="....")
+        hairpin = Hairpin.from_sequence("GAAA", "....")
         return motifs, helices, hairpin
 
     def test_has_motif_positions(self, simple_assembly):

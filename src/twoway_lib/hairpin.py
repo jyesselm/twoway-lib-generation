@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from itertools import product
 from random import Random
 
+from rna_secstruct import SecStruct
+
 # RNA nucleotides for loop generation
 RNA_NUCLEOTIDES: list[str] = ["A", "U", "G", "C"]
 
@@ -19,17 +21,44 @@ class Hairpin:
     The hairpin loop sits at the top of the construct, connecting
     the 5' and 3' arms of the hairpin stem.
 
-    Attributes:
-        sequence: Loop sequence (e.g., "GAAA").
-        structure: Loop structure (all unpaired, e.g., "....").
+    Internally uses rna_secstruct.SecStruct for validation and operations.
     """
 
-    sequence: str
-    structure: str
+    _secstruct: SecStruct
+
+    @classmethod
+    def from_sequence(cls, sequence: str, structure: str | None = None) -> "Hairpin":
+        """
+        Create a Hairpin from sequence (and optional structure).
+
+        Args:
+            sequence: Loop sequence (e.g., "GAAA").
+            structure: Loop structure (defaults to all unpaired ".").
+
+        Returns:
+            Hairpin object.
+        """
+        if structure is None:
+            structure = "." * len(sequence)
+        return cls(_secstruct=SecStruct(sequence, structure))
+
+    @property
+    def sequence(self) -> str:
+        """Loop sequence (e.g., 'GAAA')."""
+        return self._secstruct.sequence
+
+    @property
+    def structure(self) -> str:
+        """Loop structure (all unpaired, e.g., '....')."""
+        return self._secstruct.structure
 
     def length(self) -> int:
         """Return the loop length."""
-        return len(self.sequence)
+        return len(self._secstruct)
+
+    def to_secstruct(self) -> SecStruct:
+        """Return the underlying SecStruct object."""
+        return self._secstruct
 
 
 def generate_all_hairpins(length: int) -> list[Hairpin]:
@@ -55,7 +84,7 @@ def generate_all_hairpins(length: int) -> list[Hairpin]:
 
     for nts in product(RNA_NUCLEOTIDES, repeat=length):
         sequence = "".join(nts)
-        hairpins.append(Hairpin(sequence=sequence, structure=structure))
+        hairpins.append(Hairpin.from_sequence(sequence, structure))
 
     return hairpins
 
@@ -83,7 +112,7 @@ def random_hairpin(length: int, rng: Random | None = None) -> Hairpin:
     sequence = "".join(rng.choice(RNA_NUCLEOTIDES) for _ in range(length))
     structure = "." * length
 
-    return Hairpin(sequence=sequence, structure=structure)
+    return Hairpin.from_sequence(sequence, structure)
 
 
 def get_stable_tetraloops() -> list[Hairpin]:
@@ -96,7 +125,7 @@ def get_stable_tetraloops() -> list[Hairpin]:
     Returns:
         List of Hairpin objects with stable tetraloop sequences.
     """
-    return [Hairpin(sequence=seq, structure="....") for seq in STABLE_TETRALOOPS]
+    return [Hairpin.from_sequence(seq, "....") for seq in STABLE_TETRALOOPS]
 
 
 def random_stable_tetraloop(rng: Random | None = None) -> Hairpin:
@@ -113,7 +142,7 @@ def random_stable_tetraloop(rng: Random | None = None) -> Hairpin:
         rng = Random()
 
     seq = rng.choice(STABLE_TETRALOOPS)
-    return Hairpin(sequence=seq, structure="....")
+    return Hairpin.from_sequence(seq, "....")
 
 
 def hairpin_from_sequence(sequence: str) -> Hairpin:
@@ -137,4 +166,4 @@ def hairpin_from_sequence(sequence: str) -> Hairpin:
     if invalid:
         raise ValueError(f"Hairpin sequence contains invalid nucleotides: {invalid}")
     structure = "." * len(sequence)
-    return Hairpin(sequence=sequence, structure=structure)
+    return Hairpin.from_sequence(sequence, structure)

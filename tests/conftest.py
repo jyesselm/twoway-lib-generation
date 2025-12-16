@@ -31,7 +31,7 @@ def sample_motifs() -> list[Motif]:
 @pytest.fixture
 def sample_helix() -> Helix:
     """A simple 3bp helix."""
-    return Helix(
+    return Helix.from_sequences(
         strand1="AGC",
         strand2="GCU",
         structure1="(((",
@@ -42,7 +42,7 @@ def sample_helix() -> Helix:
 @pytest.fixture
 def sample_hairpin() -> Hairpin:
     """A simple 4nt hairpin loop."""
-    return Hairpin(sequence="GAAA", structure="....")
+    return Hairpin.from_sequence("GAAA", "....")
 
 
 @pytest.fixture

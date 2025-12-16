@@ -1,9 +1,11 @@
 """Motif representation and parsing for two-way junctions."""
 
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 
 import pandas as pd
+from rna_secstruct import SecStruct
 
 
 @dataclass(frozen=True)
@@ -16,21 +18,10 @@ class Motif:
     - sequence: "GAC&GC"
     - structure: "(.(&))"
 
-    Attributes:
-        sequence: Full motif sequence with & separator.
-        structure: Full dot-bracket structure with & separator.
-        strand1_seq: First strand sequence (5' to 3').
-        strand2_seq: Second strand sequence (5' to 3').
-        strand1_ss: First strand secondary structure.
-        strand2_ss: Second strand secondary structure.
+    Internally uses rna_secstruct.SecStruct for validation and operations.
     """
 
-    sequence: str
-    structure: str
-    strand1_seq: str
-    strand2_seq: str
-    strand1_ss: str
-    strand2_ss: str
+    _secstruct: SecStruct
 
     @classmethod
     def from_string(cls, sequence: str, structure: str) -> "Motif":
@@ -49,21 +40,46 @@ class Motif:
         """
         sequence = sequence.upper().replace("T", "U")
         _validate_motif_format(sequence, structure)
+        ss = SecStruct(sequence, structure)
+        return cls(_secstruct=ss)
 
-        strand1_seq, strand2_seq = sequence.split("&")
-        strand1_ss, strand2_ss = structure.split("&")
+    @property
+    def sequence(self) -> str:
+        """Full motif sequence with & separator."""
+        return self._secstruct.sequence
 
-        return cls(
-            sequence=sequence,
-            structure=structure,
-            strand1_seq=strand1_seq,
-            strand2_seq=strand2_seq,
-            strand1_ss=strand1_ss,
-            strand2_ss=strand2_ss,
-        )
+    @property
+    def structure(self) -> str:
+        """Full dot-bracket structure with & separator."""
+        return self._secstruct.structure
+
+    @cached_property
+    def _strands(self) -> list[SecStruct]:
+        """Cached split strands."""
+        return self._secstruct.split_strands()
+
+    @property
+    def strand1_seq(self) -> str:
+        """First strand sequence (5' to 3')."""
+        return self._strands[0].sequence
+
+    @property
+    def strand2_seq(self) -> str:
+        """Second strand sequence (5' to 3')."""
+        return self._strands[1].sequence
+
+    @property
+    def strand1_ss(self) -> str:
+        """First strand secondary structure."""
+        return self._strands[0].structure
+
+    @property
+    def strand2_ss(self) -> str:
+        """Second strand secondary structure."""
+        return self._strands[1].structure
 
     def total_length(self) -> int:
-        """Return total length of both strands."""
+        """Return total length of both strands (excluding separator)."""
         return len(self.strand1_seq) + len(self.strand2_seq)
 
     def strand1_length(self) -> int:
@@ -81,22 +97,20 @@ class Motif:
         The flip operation swaps strand1 and strand2, creating a new motif
         where what was the 5' side becomes the 3' side and vice versa.
 
-        Example:
-            GGA&CCU with ((&)) becomes CCU&GGA with )(&((
-
         Returns:
             New Motif with swapped strands.
         """
-        new_sequence = f"{self.strand2_seq}&{self.strand1_seq}"
-        new_structure = f"{self.strand2_ss}&{self.strand1_ss}"
-        return Motif(
-            sequence=new_sequence,
-            structure=new_structure,
-            strand1_seq=self.strand2_seq,
-            strand2_seq=self.strand1_seq,
-            strand1_ss=self.strand2_ss,
-            strand2_ss=self.strand1_ss,
-        )
+        # Join strand2 with strand1 (reversed order)
+        new_ss = self._strands[1].join(self._strands[0])
+        return Motif(_secstruct=new_ss)
+
+    def to_secstruct(self) -> SecStruct:
+        """Return the underlying SecStruct object."""
+        return self._secstruct
+
+    def is_valid(self) -> bool:
+        """Check if the motif structure is valid."""
+        return self._secstruct.is_valid()
 
 
 def _validate_motif_format(sequence: str, structure: str) -> None:
@@ -114,8 +128,8 @@ def _validate_motif_format(sequence: str, structure: str) -> None:
     seq_parts = sequence.split("&")
     ss_parts = structure.split("&")
     _validate_strand_counts(seq_parts, ss_parts, sequence, structure)
-    _validate_strand_lengths(seq_parts, ss_parts, sequence, structure)
     _validate_strand_characters(seq_parts, ss_parts)
+    # SecStruct constructor will validate length matching
 
 
 def _validate_separators(sequence: str, structure: str) -> None:
@@ -134,20 +148,6 @@ def _validate_strand_counts(
         raise ValueError(f"Motif must have exactly 2 strands: {sequence}")
     if len(ss_parts) != 2:
         raise ValueError(f"Structure must have exactly 2 parts: {structure}")
-
-
-def _validate_strand_lengths(
-    seq_parts: list[str], ss_parts: list[str], sequence: str, structure: str
-) -> None:
-    """Validate that sequence and structure lengths match."""
-    if len(seq_parts[0]) != len(ss_parts[0]):
-        raise ValueError(
-            f"Strand 1 sequence/structure length mismatch: {sequence}, {structure}"
-        )
-    if len(seq_parts[1]) != len(ss_parts[1]):
-        raise ValueError(
-            f"Strand 2 sequence/structure length mismatch: {sequence}, {structure}"
-        )
 
 
 def _validate_strand_characters(seq_parts: list[str], ss_parts: list[str]) -> None:
@@ -230,6 +230,13 @@ def validate_motif(motif: Motif) -> None:
     Raises:
         ValueError: If motif structure is invalid.
     """
+    # Check character validity first
+    if ")" in motif.strand1_ss:
+        raise ValueError("Strand 1 should only have '(' or '.' characters")
+    if "(" in motif.strand2_ss:
+        raise ValueError("Strand 2 should only have ')' or '.' characters")
+
+    # Then check balance
     open_count = motif.strand1_ss.count("(")
     close_count = motif.strand2_ss.count(")")
 
@@ -237,8 +244,3 @@ def validate_motif(motif: Motif) -> None:
         raise ValueError(
             f"Unbalanced parentheses in motif: {open_count} opens, {close_count} closes"
         )
-
-    if ")" in motif.strand1_ss:
-        raise ValueError("Strand 1 should only have '(' or '.' characters")
-    if "(" in motif.strand2_ss:
-        raise ValueError("Strand 2 should only have ')' or '.' characters")

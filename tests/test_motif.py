@@ -48,7 +48,7 @@ class TestMotif:
             Motif.from_string("GAC&GC", "(.(.))")
 
     def test_from_string_length_mismatch(self):
-        with pytest.raises(ValueError, match="length mismatch"):
+        with pytest.raises(ValueError, match="same length"):
             Motif.from_string("GACAA&GC", "(.(&))")
 
     def test_from_string_invalid_nucleotide(self):
@@ -95,38 +95,22 @@ class TestValidateMotif:
         validate_motif(sample_motif)
 
     def test_unbalanced_parentheses(self):
-        motif = Motif(
-            sequence="GAC&GC",
-            structure="(((&))",
-            strand1_seq="GAC",
-            strand2_seq="GC",
-            strand1_ss="(((",
-            strand2_ss="))",
-        )
+        # 3 opens in strand1, only 2 closes in strand2
+        motif = Motif.from_string("GAC&GC", "(((&))")
         with pytest.raises(ValueError, match="Unbalanced parentheses"):
             validate_motif(motif)
 
     def test_closing_bracket_in_strand1(self):
-        motif = Motif(
-            sequence="GAC&GC",
-            structure="()(&))",
-            strand1_seq="GAC",
-            strand2_seq="GC",
-            strand1_ss="()(",
-            strand2_ss="))",
-        )
+        # strand1 = ".)(" has ')' which is not allowed for two-way junctions
+        # but overall structure is balanced (1 open, 1 close)
+        motif = Motif.from_string("GAC&GC", ".)(&.)")
         with pytest.raises(ValueError, match="Strand 1 should only have"):
             validate_motif(motif)
 
     def test_opening_bracket_in_strand2(self):
-        motif = Motif(
-            sequence="GAC&GCC",
-            structure="(.(&(.))",
-            strand1_seq="GAC",
-            strand2_seq="GCC",
-            strand1_ss="(.(",
-            strand2_ss="(.))",
-        )
+        # strand2 has '(' which is not allowed for two-way junctions
+        # Character check now happens before balance check
+        motif = Motif.from_string("GAC&GCC", "(.(&(.)")
         with pytest.raises(ValueError, match="Strand 2 should only have"):
             validate_motif(motif)
 

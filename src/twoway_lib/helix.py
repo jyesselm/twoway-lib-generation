@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from itertools import product
 from random import Random
 
+from rna_secstruct import SecStruct
+
 # Standard Watson-Crick base pairs
 WC_PAIRS: list[tuple[str, str]] = [("A", "U"), ("U", "A"), ("G", "C"), ("C", "G")]
 
@@ -16,21 +18,53 @@ class Helix:
     Strand 1 goes 5' to 3' on the left arm of the hairpin.
     Strand 2 goes 5' to 3' on the right arm (reverse complement direction).
 
-    Attributes:
-        strand1: First strand sequence (e.g., "AGC").
-        strand2: Second strand sequence, reverse complement (e.g., "GCU").
-        structure1: First strand structure (e.g., "(((").
-        structure2: Second strand structure (e.g., ")))").
+    Internally uses rna_secstruct.SecStruct for each strand.
     """
 
-    strand1: str
-    strand2: str
-    structure1: str
-    structure2: str
+    _strand1_ss: SecStruct
+    _strand2_ss: SecStruct
+
+    @classmethod
+    def from_sequences(
+        cls, strand1: str, strand2: str, structure1: str, structure2: str
+    ) -> "Helix":
+        """Create a Helix from strand sequences and structures."""
+        return cls(
+            _strand1_ss=SecStruct(strand1, structure1),
+            _strand2_ss=SecStruct(strand2, structure2),
+        )
+
+    @property
+    def strand1(self) -> str:
+        """First strand sequence (e.g., 'AGC')."""
+        return self._strand1_ss.sequence
+
+    @property
+    def strand2(self) -> str:
+        """Second strand sequence, reverse complement (e.g., 'GCU')."""
+        return self._strand2_ss.sequence
+
+    @property
+    def structure1(self) -> str:
+        """First strand structure (e.g., '(((')."""
+        return self._strand1_ss.structure
+
+    @property
+    def structure2(self) -> str:
+        """Second strand structure (e.g., ')))')."""
+        return self._strand2_ss.structure
 
     def length(self) -> int:
         """Return the number of base pairs."""
-        return len(self.strand1)
+        return len(self._strand1_ss)
+
+    def strand1_secstruct(self) -> SecStruct:
+        """Return SecStruct for strand1."""
+        return self._strand1_ss
+
+    def strand2_secstruct(self) -> SecStruct:
+        """Return SecStruct for strand2."""
+        return self._strand2_ss
 
 
 def generate_all_helices(length: int) -> list[Helix]:
@@ -74,12 +108,7 @@ def _create_helix_from_pairs(bp_combo: tuple[tuple[str, str], ...]) -> Helix:
     structure1 = "(" * len(bp_combo)
     structure2 = ")" * len(bp_combo)
 
-    return Helix(
-        strand1=strand1,
-        strand2=strand2,
-        structure1=structure1,
-        structure2=structure2,
-    )
+    return Helix.from_sequences(strand1, strand2, structure1, structure2)
 
 
 def random_helix(length: int, rng: Random | None = None) -> Helix:
@@ -133,9 +162,4 @@ def helix_from_strand1(strand1: str) -> Helix:
     structure1 = "(" * len(strand1)
     structure2 = ")" * len(strand1)
 
-    return Helix(
-        strand1=strand1,
-        strand2=strand2,
-        structure1=structure1,
-        structure2=structure2,
-    )
+    return Helix.from_sequences(strand1, strand2, structure1, structure2)

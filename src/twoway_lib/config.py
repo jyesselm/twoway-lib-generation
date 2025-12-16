@@ -1,10 +1,12 @@
 """Configuration management for two-way junction library generation."""
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import yaml
+from rna_secstruct import SecStruct
 
 
 @dataclass
@@ -70,6 +72,16 @@ class LibraryConfig:
     def p3_length(self) -> int:
         """Length of 3' common sequence."""
         return len(self.p3_sequence)
+
+    @cached_property
+    def p5_secstruct(self) -> SecStruct:
+        """Return SecStruct for 5' common region."""
+        return SecStruct(self.p5_sequence, self.p5_structure)
+
+    @cached_property
+    def p3_secstruct(self) -> SecStruct:
+        """Return SecStruct for 3' common region."""
+        return SecStruct(self.p3_sequence, self.p3_structure)
 
 
 def load_config(path: Path | str) -> LibraryConfig:
@@ -190,6 +202,7 @@ def _validate_sequences(config: LibraryConfig) -> None:
     valid_nts = set("AUGC")
     valid_ss = set("().")
 
+    # Basic character validation first
     for name, seq in [
         ("p5_sequence", config.p5_sequence),
         ("p3_sequence", config.p3_sequence),
@@ -210,6 +223,7 @@ def _validate_sequences(config: LibraryConfig) -> None:
         if invalid:
             raise ValueError(f"{name} contains invalid characters: {invalid}")
 
+    # Length validation - p5/p3 are fragments so brackets won't be balanced
     if len(config.p5_sequence) != len(config.p5_structure):
         raise ValueError("p5_sequence and p5_structure must have same length")
     if len(config.p3_sequence) != len(config.p3_structure):
