@@ -1,0 +1,34 @@
+# Example configuration for two-way junction library generation
+
+target_length:
+  min: 115
+  max: 140
+
+motifs_per_construct:
+  min: 6
+  max: 7
+
+# Common 5' and 3' sequences that frame the construct
+p5_sequence: "GGAACAGCACUUCGGUGCC"
+p5_structure: "((((.(((((....)))))"
+
+p3_sequence: "GAAGUGGCUGACCCC"
+p3_structure: ")))))....))))))"
+
+# Structural elements
+helix_length: 3
+hairpin_loop_length: 4
+
+# Validation settings
+validation:
+  enabled: true
+  max_ensemble_defect: 3.0
+  allow_structure_differences: false
+  min_structure_match: 0.9
+
+# Optimization settings for simulated annealing
+optimization:
+  iterations: 100000
+  initial_temperature: 10.0
+  cooling_rate: 0.00001
+  target_library_size: 3000
