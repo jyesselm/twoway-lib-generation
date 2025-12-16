@@ -23,6 +23,43 @@ class TestConstruct:
     def test_motifs_list(self, sample_construct: Construct):
         assert len(sample_construct.motifs) == 1
 
+    def test_is_valid_true(self):
+        construct = Construct(
+            sequence="GGGAAACCC",
+            structure="(((...)))",
+            motifs=[],
+        )
+        assert construct.is_valid() is True
+
+    def test_is_valid_false_length_mismatch(self):
+        construct = Construct(
+            sequence="GGGAAA",
+            structure="(((...)))",
+            motifs=[],
+        )
+        assert construct.is_valid() is False
+
+    def test_validate_raises_on_invalid(self):
+        construct = Construct(
+            sequence="GGGAAA",
+            structure="(((...)))",
+            motifs=[],
+        )
+        with pytest.raises(ValueError):
+            construct.validate()
+
+    def test_to_secstruct(self):
+        from rna_secstruct import SecStruct
+        construct = Construct(
+            sequence="GGGAAACCC",
+            structure="(((...)))",
+            motifs=[],
+        )
+        ss = construct.to_secstruct()
+        assert isinstance(ss, SecStruct)
+        assert ss.sequence == "GGGAAACCC"
+        assert ss.structure == "(((...)))"
+
 
 class TestAssembleConstruct:
     """Tests for assemble_construct function."""

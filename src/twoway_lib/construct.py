@@ -69,6 +69,22 @@ class Construct:
         """Convert to rna_secstruct.SecStruct object."""
         return SecStruct(self.sequence, self.structure)
 
+    def is_valid(self) -> bool:
+        """Check if the construct has valid sequence/structure using SecStruct."""
+        try:
+            return self.to_secstruct().is_valid()
+        except ValueError:
+            return False
+
+    def validate(self) -> None:
+        """
+        Validate that the construct has well-formed sequence and structure.
+
+        Raises:
+            ValueError: If the construct is invalid.
+        """
+        self.to_secstruct().validate()
+
 
 def assemble_construct(
     motifs: list[Motif],

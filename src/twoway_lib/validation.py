@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from rna_secstruct import SecStruct
+
 if TYPE_CHECKING:
     from twoway_lib.construct import Construct
 
@@ -111,6 +113,8 @@ def compare_structures(designed: str, predicted: str) -> float:
     """
     Calculate fraction of matching positions between structures.
 
+    Uses rna_secstruct.SecStruct.structural_similarity for comparison.
+
     Args:
         designed: Designed secondary structure.
         predicted: Predicted secondary structure.
@@ -124,8 +128,11 @@ def compare_structures(designed: str, predicted: str) -> float:
     if len(designed) == 0:
         return 1.0
 
-    matches = sum(1 for d, p in zip(designed, predicted, strict=True) if d == p)
-    return matches / len(designed)
+    # Use dummy sequences since we only compare structure
+    dummy_seq = "N" * len(designed)
+    designed_ss = SecStruct(dummy_seq, designed)
+    predicted_ss = SecStruct(dummy_seq, predicted)
+    return designed_ss.structural_similarity(predicted_ss)
 
 
 def count_structure_differences(designed: str, predicted: str) -> dict[str, int]:
@@ -161,3 +168,27 @@ def count_structure_differences(designed: str, predicted: str) -> dict[str, int]
             counts["bracket_swap"] += 1
 
     return counts
+
+
+def validate_structure_format(sequence: str, structure: str) -> tuple[bool, str]:
+    """
+    Validate that a sequence and structure are well-formed using SecStruct.
+
+    Checks for:
+    - Matching lengths
+    - Balanced brackets
+    - Valid characters
+
+    Args:
+        sequence: RNA sequence.
+        structure: Dot-bracket secondary structure.
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+    """
+    try:
+        ss = SecStruct(sequence, structure)
+        ss.validate()
+        return True, ""
+    except ValueError as e:
+        return False, str(e)

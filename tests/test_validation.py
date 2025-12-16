@@ -11,6 +11,7 @@ from twoway_lib.validation import (
     count_structure_differences,
     fold_sequence,
     validate_construct,
+    validate_structure_format,
 )
 
 
@@ -148,3 +149,31 @@ class TestValidateConstruct:
         )
         assert result.fold_result is not None
         assert result.fold_result.sequence == simple_construct.sequence
+
+
+class TestValidateStructureFormat:
+    """Tests for validate_structure_format function."""
+
+    def test_valid_structure(self):
+        is_valid, error = validate_structure_format("GGGAAACCC", "(((...)))")
+        assert is_valid is True
+        assert error == ""
+
+    def test_length_mismatch(self):
+        is_valid, error = validate_structure_format("GGGAAA", "(((...)))")
+        assert is_valid is False
+        assert "length" in error.lower()
+
+    def test_unbalanced_brackets(self):
+        is_valid, error = validate_structure_format("GGGAAACCC", "(((...))")
+        assert is_valid is False
+
+    def test_valid_multi_strand(self):
+        is_valid, error = validate_structure_format("GAC&GC", "(.(&))")
+        assert is_valid is True
+        assert error == ""
+
+    def test_strand_separator_mismatch(self):
+        is_valid, error = validate_structure_format("GAC&GC", "(.(.))")
+        assert is_valid is False
+        assert "strand" in error.lower()
