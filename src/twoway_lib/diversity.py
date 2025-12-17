@@ -1,9 +1,14 @@
-"""Edit distance calculations for sequence diversity."""
+"""Edit distance calculations for sequence diversity.
+
+Uses editdistance package (dependency of seq_tools) for Levenshtein distance.
+The simulated annealing optimizer maximizes sequence diversity by using
+these edit distance calculations.
+"""
 
 from concurrent.futures import ProcessPoolExecutor
 from itertools import combinations
 
-import editdistance
+import editdistance  # From seq_tools dependency
 import numpy as np
 
 

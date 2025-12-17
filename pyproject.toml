@@ -25,7 +25,8 @@ dependencies = [
     "pandas>=2.0",
     "numpy>=1.24",
     "pyyaml>=6.0",
-    "editdistance>=0.6",
+    "seq-tools",
+    "rna-secstruct",
 ]
 
 [project.optional-dependencies]
