@@ -145,12 +145,13 @@ def random_stable_tetraloop(rng: Random | None = None) -> Hairpin:
     return Hairpin.from_sequence(seq, "....")
 
 
-def hairpin_from_sequence(sequence: str) -> Hairpin:
+def hairpin_from_sequence(sequence: str, structure: str | None = None) -> Hairpin:
     """
-    Create a hairpin from a specific sequence.
+    Create a hairpin from a specific sequence and optional structure.
 
     Args:
         sequence: RNA sequence for the hairpin loop.
+        structure: Optional structure (defaults to all unpaired).
 
     Returns:
         Hairpin object with the specified sequence.
@@ -165,5 +166,6 @@ def hairpin_from_sequence(sequence: str) -> Hairpin:
     invalid = set(sequence) - valid_nts
     if invalid:
         raise ValueError(f"Hairpin sequence contains invalid nucleotides: {invalid}")
-    structure = "." * len(sequence)
+    if structure is None:
+        structure = "." * len(sequence)
     return Hairpin.from_sequence(sequence, structure)

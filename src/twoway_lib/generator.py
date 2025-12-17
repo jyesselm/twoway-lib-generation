@@ -1,8 +1,9 @@
 """Main library generation pipeline."""
 
-import logging
 from dataclasses import dataclass
 from random import Random
+
+import structlog
 
 from twoway_lib.config import LibraryConfig
 from twoway_lib.construct import (
@@ -14,9 +15,9 @@ from twoway_lib.hairpin import hairpin_from_sequence, random_hairpin
 from twoway_lib.helix import Helix, random_helix
 from twoway_lib.motif import Motif
 from twoway_lib.optimizer import LibraryOptimizer
-from twoway_lib.validation import validate_construct
+from twoway_lib.validation import check_sequence_constraints, validate_construct
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -27,7 +28,8 @@ class GenerationStats:
     candidates_valid: int
     candidates_rejected_length: int
     candidates_rejected_validation: int
-    final_library_size: int
+    candidates_rejected_sequence: int = 0
+    final_library_size: int = 0
     motif_usage: dict[str, int] | None = None
 
 
@@ -72,18 +74,18 @@ class LibraryGenerator:
         self.stats = GenerationStats(0, 0, 0, 0, 0)
         self._motif_usage = {m.sequence: 0 for m in self.motifs}
 
-        logger.info(f"Generating {num_candidates} candidate constructs...")
+        logger.info("Generating candidate constructs", count=num_candidates)
         candidates = self._generate_candidates(num_candidates)
-        logger.info(f"Generated {len(candidates)} valid candidates")
+        logger.info("Generated valid candidates", count=len(candidates))
 
         if len(candidates) <= self.config.optimization.target_library_size:
             self.stats.final_library_size = len(candidates)
             self.stats.motif_usage = dict(self._motif_usage)
             return candidates
 
-        logger.info("Selecting diverse subset with simulated annealing...")
+        logger.info("Selecting diverse subset with simulated annealing")
         selected = self._select_diverse_library(candidates)
-        logger.info(f"Selected {len(selected)} constructs")
+        logger.info("Selected constructs", count=len(selected))
 
         self.stats.final_library_size = len(selected)
         self._update_usage_for_selected(selected)
@@ -129,6 +131,10 @@ class LibraryGenerator:
             self.stats.candidates_rejected_length += 1
             return None
 
+        if not self._check_sequence_constraints(construct):
+            self.stats.candidates_rejected_sequence += 1
+            return None
+
         if not self._validate(construct):
             self.stats.candidates_rejected_validation += 1
             return None
@@ -172,7 +178,9 @@ class LibraryGenerator:
         """Assemble construct and check length constraint."""
         helices = self._generate_helices(len(motifs) + 1)
         if self.config.hairpin_sequence:
-            hairpin = hairpin_from_sequence(self.config.hairpin_sequence)
+            hairpin = hairpin_from_sequence(
+                self.config.hairpin_sequence, self.config.hairpin_structure
+            )
         else:
             hairpin = random_hairpin(self.config.hairpin_loop_length, self.rng)
 
@@ -198,6 +206,45 @@ class LibraryGenerator:
         """Check if construct length is within target range."""
         length = construct.length()
         return self.config.target_length_min <= length <= self.config.target_length_max
+
+    def _check_sequence_constraints(self, construct: Construct) -> bool:
+        """Check sequence constraints (consecutive nucleotides, GC pairs)."""
+        val_config = self.config.validation
+
+        # Skip if validation is disabled or neither constraint is enabled
+        if not val_config.enabled:
+            return True
+        if not val_config.avoid_consecutive_nucleotides and not val_config.avoid_consecutive_gc_pairs:
+            return True
+
+        # Get motif sequences for exclusion (patterns in motifs are allowed)
+        motif_sequences = [m.sequence.replace("&", "") for m in construct.motifs]
+
+        # Check consecutive nucleotides
+        if val_config.avoid_consecutive_nucleotides:
+            from twoway_lib.validation import find_consecutive_nucleotides
+
+            violations = find_consecutive_nucleotides(
+                construct.sequence, val_config.max_consecutive_nucleotides
+            )
+            # Filter out violations that exist in motifs
+            for pos, nt in violations:
+                run = nt * val_config.max_consecutive_nucleotides
+                if not any(run in motif for motif in motif_sequences):
+                    return False
+
+        # Check consecutive GC pairs
+        if val_config.avoid_consecutive_gc_pairs:
+            from twoway_lib.validation import has_consecutive_gc_pairs
+
+            if has_consecutive_gc_pairs(
+                construct.sequence,
+                construct.structure,
+                val_config.max_consecutive_gc_pairs,
+            ):
+                return False
+
+        return True
 
     def _validate(self, construct: Construct) -> bool:
         """Validate construct with Vienna fold."""

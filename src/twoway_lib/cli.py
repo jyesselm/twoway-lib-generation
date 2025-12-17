@@ -1,9 +1,9 @@
 """Command line interface for two-way junction library generation."""
 
-import logging
 import sys
 
 import click
+import structlog
 
 from twoway_lib.config import (
     generate_default_config,
@@ -49,24 +49,24 @@ def generate(
     MOTIFS_PATH: Path to CSV file with motifs
     """
     _setup_logging(verbose)
-    logger = logging.getLogger(__name__)
+    log = structlog.get_logger()
 
     try:
         config = load_config(config_path)
         motifs = load_motifs(motifs_path)
-        logger.info(f"Loaded config from {config_path}")
-        logger.info(f"Loaded {len(motifs)} motifs from {motifs_path}")
+        log.info("Loaded config", path=config_path)
+        log.info("Loaded motifs", count=len(motifs), path=motifs_path)
 
         generator = LibraryGenerator(config, motifs, seed=seed)
         constructs = generator.generate(num_candidates)
 
         save_library_json(constructs, output)
-        logger.info(f"Saved {len(constructs)} constructs to {output}")
+        log.info("Saved constructs", count=len(constructs), path=output)
 
         _print_summary(constructs)
 
     except Exception as e:
-        logger.error(f"Error: {e}")
+        log.error("Error during generation", error=str(e))
         sys.exit(1)
 
 
@@ -193,12 +193,30 @@ def primers() -> None:
 
 
 def _setup_logging(verbose: bool) -> None:
-    """Configure logging based on verbosity."""
+    """Configure structlog based on verbosity."""
+    import logging
+
     level = logging.DEBUG if verbose else logging.INFO
+
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.processors.TimeStamper(fmt="%H:%M:%S"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.dev.ConsoleRenderer(),
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+
     logging.basicConfig(
+        format="%(message)s",
         level=level,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%H:%M:%S",
     )
 
 

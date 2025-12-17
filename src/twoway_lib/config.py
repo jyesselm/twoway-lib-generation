@@ -18,6 +18,10 @@ class ValidationConfig:
     max_ensemble_defect: float = 3.0
     allow_structure_differences: bool = False
     min_structure_match: float = 0.9
+    avoid_consecutive_nucleotides: bool = True
+    max_consecutive_nucleotides: int = 4
+    avoid_consecutive_gc_pairs: bool = True
+    max_consecutive_gc_pairs: int = 3
 
 
 @dataclass
@@ -45,6 +49,7 @@ class LibraryConfig:
     helix_length: int = 3
     hairpin_loop_length: int = 4
     hairpin_sequence: str | None = None
+    hairpin_structure: str | None = None
     allow_motif_flip: bool = False
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
@@ -143,6 +148,7 @@ def _parse_config_dict(data: dict[str, Any]) -> LibraryConfig:
         helix_length=data.get("helix_length", 3),
         hairpin_loop_length=data.get("hairpin_loop_length", 4),
         hairpin_sequence=data.get("hairpin_sequence"),
+        hairpin_structure=data.get("hairpin_structure"),
         allow_motif_flip=data.get("allow_motif_flip", False),
         validation=validation,
         optimization=optimization,
@@ -174,6 +180,10 @@ def _parse_validation_config(data: dict[str, Any]) -> ValidationConfig:
         max_ensemble_defect=data.get("max_ensemble_defect", 3.0),
         allow_structure_differences=data.get("allow_structure_differences", False),
         min_structure_match=data.get("min_structure_match", 0.9),
+        avoid_consecutive_nucleotides=data.get("avoid_consecutive_nucleotides", True),
+        max_consecutive_nucleotides=data.get("max_consecutive_nucleotides", 4),
+        avoid_consecutive_gc_pairs=data.get("avoid_consecutive_gc_pairs", True),
+        max_consecutive_gc_pairs=data.get("max_consecutive_gc_pairs", 3),
     )
 
 
@@ -274,18 +284,37 @@ def _validate_optimization_config(config: OptimizationConfig) -> None:
 
 
 def _validate_hairpin_sequence(config: LibraryConfig) -> None:
-    """Validate hairpin_sequence if provided."""
-    if config.hairpin_sequence is None:
+    """Validate hairpin_sequence and hairpin_structure if provided."""
+    if config.hairpin_sequence is None and config.hairpin_structure is None:
         return
+
     valid_nts = set("AUGC")
-    invalid = set(config.hairpin_sequence.upper()) - valid_nts
-    if invalid:
-        raise ValueError(f"hairpin_sequence contains invalid nucleotides: {invalid}")
-    if len(config.hairpin_sequence) != config.hairpin_loop_length:
-        raise ValueError(
-            f"hairpin_sequence length ({len(config.hairpin_sequence)}) must match "
-            f"hairpin_loop_length ({config.hairpin_loop_length})"
-        )
+    valid_ss = set("().")
+
+    if config.hairpin_sequence is not None:
+        invalid = set(config.hairpin_sequence.upper()) - valid_nts
+        if invalid:
+            raise ValueError(f"hairpin_sequence contains invalid nucleotides: {invalid}")
+        if len(config.hairpin_sequence) != config.hairpin_loop_length:
+            raise ValueError(
+                f"hairpin_sequence length ({len(config.hairpin_sequence)}) must match "
+                f"hairpin_loop_length ({config.hairpin_loop_length})"
+            )
+
+    if config.hairpin_structure is not None:
+        invalid = set(config.hairpin_structure) - valid_ss
+        if invalid:
+            raise ValueError(f"hairpin_structure contains invalid characters: {invalid}")
+        if len(config.hairpin_structure) != config.hairpin_loop_length:
+            raise ValueError(
+                f"hairpin_structure length ({len(config.hairpin_structure)}) must match "
+                f"hairpin_loop_length ({config.hairpin_loop_length})"
+            )
+
+    # If both provided, they must have same length
+    if config.hairpin_sequence and config.hairpin_structure:
+        if len(config.hairpin_sequence) != len(config.hairpin_structure):
+            raise ValueError("hairpin_sequence and hairpin_structure must have same length")
 
 
 def generate_default_config() -> LibraryConfig:
@@ -344,6 +373,8 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
     }
     if config.hairpin_sequence is not None:
         data["hairpin_sequence"] = config.hairpin_sequence
+    if config.hairpin_structure is not None:
+        data["hairpin_structure"] = config.hairpin_structure
     if config.allow_motif_flip:
         data["allow_motif_flip"] = config.allow_motif_flip
     data["validation"] = {
@@ -351,6 +382,10 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
         "max_ensemble_defect": config.validation.max_ensemble_defect,
         "allow_structure_differences": config.validation.allow_structure_differences,
         "min_structure_match": config.validation.min_structure_match,
+        "avoid_consecutive_nucleotides": config.validation.avoid_consecutive_nucleotides,
+        "max_consecutive_nucleotides": config.validation.max_consecutive_nucleotides,
+        "avoid_consecutive_gc_pairs": config.validation.avoid_consecutive_gc_pairs,
+        "max_consecutive_gc_pairs": config.validation.max_consecutive_gc_pairs,
     }
     data["optimization"] = {
         "iterations": config.optimization.iterations,
