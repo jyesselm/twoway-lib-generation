@@ -29,6 +29,11 @@ validation:
   max_ensemble_defect: 10.0
   allow_structure_differences: true
   min_structure_match: 0.7
+  # Sequence constraints (set to false to disable)
+  avoid_consecutive_nucleotides: true
+  max_consecutive_nucleotides: 4  # Reject AAAA, UUUU, etc.
+  avoid_consecutive_gc_pairs: false  # Disabled - too restrictive with helix_length=3
+  max_consecutive_gc_pairs: 3
 
 # Optimization settings for simulated annealing
 optimization:
