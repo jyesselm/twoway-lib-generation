@@ -5,9 +5,14 @@ import sys
 
 import click
 
-from twoway_lib.config import generate_default_config, load_config, save_config
+from twoway_lib.config import (
+    generate_default_config,
+    list_available_primers,
+    load_config,
+    save_config,
+)
 from twoway_lib.generator import LibraryGenerator, estimate_feasible_lengths
-from twoway_lib.io import get_library_summary, save_library_csv
+from twoway_lib.io import get_library_summary, save_library_json
 from twoway_lib.motif import load_motifs
 
 
@@ -21,7 +26,7 @@ def cli() -> None:
 @cli.command()
 @click.argument("config_path", type=click.Path(exists=True))
 @click.argument("motifs_path", type=click.Path(exists=True))
-@click.option("-o", "--output", default="library.csv", help="Output CSV file path")
+@click.option("-o", "--output", default="library.json", help="Output JSON file path")
 @click.option(
     "-n", "--num-candidates", default=50000, help="Number of candidates to generate"
 )
@@ -55,7 +60,7 @@ def generate(
         generator = LibraryGenerator(config, motifs, seed=seed)
         constructs = generator.generate(num_candidates)
 
-        save_library_csv(constructs, output)
+        save_library_json(constructs, output)
         logger.info(f"Saved {len(constructs)} constructs to {output}")
 
         _print_summary(constructs)
@@ -113,12 +118,12 @@ def summary(library_path: str) -> None:
     """
     Display summary statistics for a generated library.
 
-    LIBRARY_PATH: Path to library CSV file
+    LIBRARY_PATH: Path to library JSON file
     """
-    from twoway_lib.io import load_library_csv
+    from twoway_lib.io import load_library_json
 
     try:
-        rows = load_library_csv(library_path)
+        rows = load_library_json(library_path)
         click.echo(f"Library: {library_path}")
         click.echo(f"Constructs: {len(rows)}")
 
@@ -163,6 +168,30 @@ def config(output: str, validate_path: str | None) -> None:
             sys.exit(1)
 
 
+@cli.command()
+def primers() -> None:
+    """List available p5 and p3 primer sequences."""
+    available = list_available_primers()
+
+    click.echo("Available p5 sequences:")
+    if available["p5"]:
+        for name in available["p5"]:
+            click.echo(f"  - {name}")
+    else:
+        click.echo("  (none available - seq_tools package may not be installed)")
+
+    click.echo()
+    click.echo("Available p3 sequences:")
+    if available["p3"]:
+        for name in available["p3"]:
+            click.echo(f"  - {name}")
+    else:
+        click.echo("  (none available - seq_tools package may not be installed)")
+
+    click.echo()
+    click.echo("Use p5_name or p3_name in your config file to reference these by name.")
+
+
 def _setup_logging(verbose: bool) -> None:
     """Configure logging based on verbosity."""
     level = logging.DEBUG if verbose else logging.INFO
@@ -202,6 +231,10 @@ def _print_summary(constructs: list) -> None:
         )
         click.echo(f"  Average length: {summary['length_mean']:.1f} nt")
         click.echo(f"  Unique motifs used: {summary['unique_motifs_used']}")
+        click.echo(
+            f"  Motif usage range: {summary['motif_usage_min']}-{summary['motif_usage_max']} "
+            f"(avg: {summary['motif_usage_mean']:.1f})"
+        )
 
 
 if __name__ == "__main__":

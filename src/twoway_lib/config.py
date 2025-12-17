@@ -5,6 +5,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import yaml
 from rna_secstruct import SecStruct
 
@@ -126,15 +127,19 @@ def _parse_config_dict(data: dict[str, Any]) -> LibraryConfig:
     target_length = data.get("target_length", {})
     motifs_per = data.get("motifs_per_construct", {})
 
+    # Handle p5/p3 by name or direct sequence
+    p5_seq, p5_struct = _resolve_primer_config(data, "p5")
+    p3_seq, p3_struct = _resolve_primer_config(data, "p3")
+
     return LibraryConfig(
         target_length_min=target_length.get("min", 145),
         target_length_max=target_length.get("max", 150),
         motifs_per_construct_min=motifs_per.get("min", 6),
         motifs_per_construct_max=motifs_per.get("max", 7),
-        p5_sequence=data.get("p5_sequence", ""),
-        p5_structure=data.get("p5_structure", ""),
-        p3_sequence=data.get("p3_sequence", ""),
-        p3_structure=data.get("p3_structure", ""),
+        p5_sequence=p5_seq,
+        p5_structure=p5_struct,
+        p3_sequence=p3_seq,
+        p3_structure=p3_struct,
         helix_length=data.get("helix_length", 3),
         hairpin_loop_length=data.get("hairpin_loop_length", 4),
         hairpin_sequence=data.get("hairpin_sequence"),
@@ -142,6 +147,24 @@ def _parse_config_dict(data: dict[str, Any]) -> LibraryConfig:
         validation=validation,
         optimization=optimization,
     )
+
+
+def _resolve_primer_config(data: dict[str, Any], prefix: str) -> tuple[str, str]:
+    """Resolve p5 or p3 config from name or direct sequence."""
+    name_key = f"{prefix}_name"
+    seq_key = f"{prefix}_sequence"
+    struct_key = f"{prefix}_structure"
+
+    if name_key in data:
+        name = data[name_key]
+        if prefix == "p5":
+            return get_p5_by_name(name)
+        else:
+            return get_p3_by_name(name)
+    else:
+        seq = data.get(seq_key, "")
+        struct = data.get(struct_key, "")
+        return seq, struct
 
 
 def _parse_validation_config(data: dict[str, Any]) -> ValidationConfig:
@@ -273,14 +296,14 @@ def generate_default_config() -> LibraryConfig:
         LibraryConfig with sensible default values.
     """
     return LibraryConfig(
-        target_length_min=115,
-        target_length_max=140,
+        target_length_min=100,
+        target_length_max=130,
         motifs_per_construct_min=6,
         motifs_per_construct_max=7,
-        p5_sequence="GGAACAGCACUUCGGUGCC",
-        p5_structure="((((.(((((....)))))",
-        p3_sequence="GAAGUGGCUGACCCC",
-        p3_structure=")))))....))))))",
+        p5_sequence="GGGCGAAAGCCC",
+        p5_structure="((((....))))",
+        p3_sequence="AAAGAAACAACAACAACAAC",
+        p3_structure="....................",
         helix_length=3,
         hairpin_loop_length=4,
         hairpin_sequence=None,
@@ -336,3 +359,96 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
         "target_library_size": config.optimization.target_library_size,
     }
     return data
+
+
+def get_p5_sequences() -> dict[str, tuple[str, str]]:
+    """
+    Get available p5 sequences from seq_tools resources.
+
+    Returns:
+        Dictionary mapping name to (sequence, structure) tuple.
+    """
+    return _load_sequence_resource("p5_sequences.csv")
+
+
+def get_p3_sequences() -> dict[str, tuple[str, str]]:
+    """
+    Get available p3 sequences from seq_tools resources.
+
+    Returns:
+        Dictionary mapping name to (sequence, structure) tuple.
+    """
+    return _load_sequence_resource("p3_sequences.csv")
+
+
+def _load_sequence_resource(filename: str) -> dict[str, tuple[str, str]]:
+    """Load sequence resource from seq_tools."""
+    try:
+        from seq_tools.utils import get_resources_path
+
+        resource_path = get_resources_path() / filename
+        if not resource_path.exists():
+            return {}
+        df = pd.read_csv(resource_path)
+        result = {}
+        for _, row in df.iterrows():
+            name = row["name"]
+            seq = row["sequence"]
+            struct = row.get("structure", "." * len(seq))
+            result[name] = (seq, struct)
+        return result
+    except (ImportError, FileNotFoundError):
+        return {}
+
+
+def get_p5_by_name(name: str) -> tuple[str, str]:
+    """
+    Get a p5 sequence by name.
+
+    Args:
+        name: Name of the p5 sequence.
+
+    Returns:
+        Tuple of (sequence, structure).
+
+    Raises:
+        ValueError: If name not found.
+    """
+    sequences = get_p5_sequences()
+    if name not in sequences:
+        available = list(sequences.keys())
+        raise ValueError(f"Unknown p5 sequence '{name}'. Available: {available}")
+    return sequences[name]
+
+
+def get_p3_by_name(name: str) -> tuple[str, str]:
+    """
+    Get a p3 sequence by name.
+
+    Args:
+        name: Name of the p3 sequence.
+
+    Returns:
+        Tuple of (sequence, structure).
+
+    Raises:
+        ValueError: If name not found.
+    """
+    sequences = get_p3_sequences()
+    if name not in sequences:
+        available = list(sequences.keys())
+        raise ValueError(f"Unknown p3 sequence '{name}'. Available: {available}")
+    return sequences[name]
+
+
+def list_available_primers() -> dict[str, list[str]]:
+    """
+    List available p5 and p3 primer names.
+
+    Returns:
+        Dictionary with 'p5' and 'p3' keys containing lists of available names.
+    """
+    return {
+        "p5": list(get_p5_sequences().keys()),
+        "p3": list(get_p3_sequences().keys()),
+    }

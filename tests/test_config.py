@@ -9,6 +9,9 @@ from twoway_lib.config import (
     OptimizationConfig,
     ValidationConfig,
     generate_default_config,
+    get_p3_sequences,
+    get_p5_sequences,
+    list_available_primers,
     load_config,
     save_config,
     validate_config,
@@ -211,3 +214,114 @@ class TestSaveConfig:
         save_config(sample_config, output_path)
         loaded = load_config(output_path)
         assert loaded.allow_motif_flip is True
+
+
+class TestPrimerLookup:
+    """Tests for primer lookup functions."""
+
+    def test_get_p5_sequences_returns_dict(self):
+        result = get_p5_sequences()
+        assert isinstance(result, dict)
+
+    def test_get_p3_sequences_returns_dict(self):
+        result = get_p3_sequences()
+        assert isinstance(result, dict)
+
+    def test_list_available_primers(self):
+        result = list_available_primers()
+        assert "p5" in result
+        assert "p3" in result
+        assert isinstance(result["p5"], list)
+        assert isinstance(result["p3"], list)
+
+    def test_p5_sequences_have_sequence_structure(self):
+        sequences = get_p5_sequences()
+        for name, (seq, struct) in sequences.items():
+            assert isinstance(seq, str)
+            assert isinstance(struct, str)
+            assert len(seq) == len(struct)
+
+    def test_p3_sequences_have_sequence_structure(self):
+        sequences = get_p3_sequences()
+        for name, (seq, struct) in sequences.items():
+            assert isinstance(seq, str)
+            assert isinstance(struct, str)
+            assert len(seq) == len(struct)
+
+
+class TestConfigWithPrimerName:
+    """Tests for loading config with p5_name/p3_name."""
+
+    def test_load_config_with_p5_name(self, temp_dir: Path):
+        p5_seqs = get_p5_sequences()
+        if not p5_seqs:
+            pytest.skip("No p5 sequences available")
+
+        p5_name = list(p5_seqs.keys())[0]
+        config_content = f"""
+target_length:
+  min: 100
+  max: 120
+motifs_per_construct:
+  min: 3
+  max: 4
+p5_name: "{p5_name}"
+p3_sequence: "AAAGAAAC"
+p3_structure: "........"
+helix_length: 3
+hairpin_loop_length: 4
+"""
+        config_file = temp_dir / "config.yaml"
+        config_file.write_text(config_content)
+
+        config = load_config(config_file)
+        expected_seq, expected_struct = p5_seqs[p5_name]
+        assert config.p5_sequence == expected_seq
+        assert config.p5_structure == expected_struct
+
+    def test_load_config_with_p3_name(self, temp_dir: Path):
+        p3_seqs = get_p3_sequences()
+        if not p3_seqs:
+            pytest.skip("No p3 sequences available")
+
+        p3_name = list(p3_seqs.keys())[0]
+        config_content = f"""
+target_length:
+  min: 100
+  max: 120
+motifs_per_construct:
+  min: 3
+  max: 4
+p5_sequence: "GGGCGAAAGCCC"
+p5_structure: "((((....))))"
+p3_name: "{p3_name}"
+helix_length: 3
+hairpin_loop_length: 4
+"""
+        config_file = temp_dir / "config.yaml"
+        config_file.write_text(config_content)
+
+        config = load_config(config_file)
+        expected_seq, expected_struct = p3_seqs[p3_name]
+        assert config.p3_sequence == expected_seq
+        assert config.p3_structure == expected_struct
+
+    def test_unknown_p5_name_raises(self, temp_dir: Path):
+        config_content = """
+target_length:
+  min: 100
+  max: 120
+motifs_per_construct:
+  min: 3
+  max: 4
+p5_name: "nonexistent_primer_xyz"
+p3_sequence: "AAAGAAAC"
+p3_structure: "........"
+helix_length: 3
+hairpin_loop_length: 4
+"""
+        config_file = temp_dir / "config.yaml"
+        config_file.write_text(config_content)
+
+        with pytest.raises(ValueError, match="Unknown p5 sequence"):
+            load_config(config_file)

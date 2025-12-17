@@ -1,62 +1,34 @@
-"""CSV I/O operations for library data."""
+"""I/O operations for library data."""
 
+import json
 from pathlib import Path
-
-import pandas as pd
 
 from twoway_lib.construct import Construct
 
 
-def save_library_csv(constructs: list[Construct], path: Path | str) -> None:
+def save_library_json(constructs: list[Construct], path: Path | str) -> None:
     """
-    Save library to CSV file.
-
-    Output columns: index, sequence, structure, length, motifs
+    Save library to JSON file.
 
     Args:
         constructs: List of constructs to save.
         path: Output file path.
     """
     path = Path(path)
-    rows = [format_construct_row(c, i) for i, c in enumerate(constructs)]
-    df = pd.DataFrame(rows)
-    df.to_csv(path, index=False)
+    data = [format_construct_dict(c, i) for i, c in enumerate(constructs)]
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
 
 
-def format_construct_row(construct: Construct, index: int) -> dict:
+def load_library_json(path: Path | str) -> list[dict]:
     """
-    Format a construct as a CSV row dictionary.
+    Load library from JSON file.
 
     Args:
-        construct: Construct to format.
-        index: Index in the library.
+        path: Path to JSON file.
 
     Returns:
-        Dictionary with row data.
-    """
-    motif_seqs = [m.sequence for m in construct.motifs]
-    row = {
-        "index": index,
-        "sequence": construct.sequence,
-        "structure": construct.structure,
-        "length": construct.length(),
-        "num_motifs": len(construct.motifs),
-        "motifs": ";".join(motif_seqs),
-    }
-    if construct.motif_positions:
-        row["motif_positions"] = construct.get_positions_string()
-    return row
-
-
-def load_library_csv(path: Path | str) -> list[dict]:
-    """
-    Load library from CSV file.
-
-    Args:
-        path: Path to CSV file.
-
-    Returns:
-        List of row dictionaries.
+        List of construct dictionaries.
 
     Raises:
         FileNotFoundError: If file doesn't exist.
@@ -65,8 +37,42 @@ def load_library_csv(path: Path | str) -> list[dict]:
     if not path.exists():
         raise FileNotFoundError(f"Library file not found: {path}")
 
-    df = pd.read_csv(path)
-    return df.to_dict("records")
+    with open(path) as f:
+        return json.load(f)
+
+
+def format_construct_dict(construct: Construct, index: int) -> dict:
+    """
+    Format a construct as a dictionary for JSON output.
+
+    Args:
+        construct: Construct to format.
+        index: Index in the library.
+
+    Returns:
+        Dictionary with construct data.
+    """
+    motifs_data = []
+    for i, motif in enumerate(construct.motifs):
+        motif_dict = {
+            "sequence": motif.sequence,
+            "structure": motif.structure,
+        }
+        if construct.motif_positions and i < len(construct.motif_positions):
+            mp = construct.motif_positions[i]
+            motif_dict["positions"] = {
+                "strand1": mp.strand1_positions,
+                "strand2": mp.strand2_positions,
+            }
+        motifs_data.append(motif_dict)
+
+    return {
+        "index": index,
+        "sequence": construct.sequence,
+        "structure": construct.structure,
+        "length": construct.length(),
+        "motifs": motifs_data,
+    }
 
 
 def save_sequences_txt(constructs: list[Construct], path: Path | str) -> None:
@@ -120,9 +126,14 @@ def get_library_summary(constructs: list[Construct]) -> dict:
     num_motifs = [len(c.motifs) for c in constructs]
 
     all_motifs = []
+    motif_counts: dict[str, int] = {}
     for c in constructs:
-        all_motifs.extend(m.sequence for m in c.motifs)
+        for m in c.motifs:
+            all_motifs.append(m.sequence)
+            motif_counts[m.sequence] = motif_counts.get(m.sequence, 0) + 1
+
     unique_motifs = len(set(all_motifs))
+    used_counts = [v for v in motif_counts.values() if v > 0]
 
     return {
         "count": len(constructs),
@@ -133,4 +144,7 @@ def get_library_summary(constructs: list[Construct]) -> dict:
         "motifs_per_construct_max": max(num_motifs),
         "unique_motifs_used": unique_motifs,
         "total_motif_usages": len(all_motifs),
+        "motif_usage_min": min(used_counts) if used_counts else 0,
+        "motif_usage_max": max(used_counts) if used_counts else 0,
+        "motif_usage_mean": sum(used_counts) / len(used_counts) if used_counts else 0,
     }

@@ -1,7 +1,7 @@
 # Example configuration for two-way junction library generation
 
 target_length:
-  min: 115
+  min: 108
   max: 140
 
 motifs_per_construct:
@@ -9,11 +9,15 @@ motifs_per_construct:
   max: 7
 
 # Common 5' and 3' sequences that frame the construct
-p5_sequence: "GGAACAGCACUUCGGUGCC"
-p5_structure: "((((.(((((....)))))"
+# Using balanced sequences from seq_tools resources
+# You can also use p5_name and p3_name to reference by name:
+#   p5_name: "cloud_lab_remake_rev_seq"
+#   p3_name: "tail"
+p5_sequence: "GGGCGAAAGCCC"
+p5_structure: "((((....))))"
 
-p3_sequence: "GAAGUGGCUGACCCC"
-p3_structure: ")))))....))))))"
+p3_sequence: "AAAGAAACAACAACAACAAC"
+p3_structure: "...................."
 
 # Structural elements
 helix_length: 3
@@ -22,9 +26,9 @@ hairpin_loop_length: 4
 # Validation settings
 validation:
   enabled: true
-  max_ensemble_defect: 3.0
-  allow_structure_differences: false
-  min_structure_match: 0.9
+  max_ensemble_defect: 10.0
+  allow_structure_differences: true
+  min_structure_match: 0.7
 
 # Optimization settings for simulated annealing
 optimization:

@@ -1,16 +1,17 @@
 """Tests for io module."""
 
+import json
 from pathlib import Path
 
 import pytest
 
 from twoway_lib.construct import Construct
 from twoway_lib.io import (
-    format_construct_row,
+    format_construct_dict,
     get_library_summary,
-    load_library_csv,
+    load_library_json,
     save_fasta,
-    save_library_csv,
+    save_library_json,
     save_sequences_txt,
 )
 from twoway_lib.motif import Motif
@@ -28,74 +29,86 @@ def test_constructs() -> list[Construct]:
     ]
 
 
-class TestFormatConstructRow:
-    """Tests for format_construct_row function."""
+class TestFormatConstructDict:
+    """Tests for format_construct_dict function."""
 
     def test_basic_formatting(self, test_constructs):
-        row = format_construct_row(test_constructs[0], 0)
-        assert row["index"] == 0
-        assert row["sequence"] == "GGGAAACCC"
-        assert row["structure"] == "(((...)))"
-        assert row["length"] == 9
+        data = format_construct_dict(test_constructs[0], 0)
+        assert data["index"] == 0
+        assert data["sequence"] == "GGGAAACCC"
+        assert data["structure"] == "(((...)))"
+        assert data["length"] == 9
 
-    def test_motifs_joined(self, test_constructs):
-        row = format_construct_row(test_constructs[2], 2)
-        assert "GAC&GC" in row["motifs"]
-        assert "AAG&CUU" in row["motifs"]
-        assert ";" in row["motifs"]
+    def test_motifs_list(self, test_constructs):
+        data = format_construct_dict(test_constructs[2], 2)
+        assert len(data["motifs"]) == 2
+        assert data["motifs"][0]["sequence"] == "GAC&GC"
+        assert data["motifs"][1]["sequence"] == "AAG&CUU"
 
-    def test_num_motifs(self, test_constructs):
-        row = format_construct_row(test_constructs[2], 2)
-        assert row["num_motifs"] == 2
+    def test_motif_structure_included(self, test_constructs):
+        data = format_construct_dict(test_constructs[0], 0)
+        assert data["motifs"][0]["structure"] == "(.(&))"
 
 
-class TestSaveLibraryCsv:
-    """Tests for save_library_csv function."""
+class TestSaveLibraryJson:
+    """Tests for save_library_json function."""
 
     def test_creates_file(self, test_constructs, temp_dir: Path):
-        output = temp_dir / "library.csv"
-        save_library_csv(test_constructs, output)
+        output = temp_dir / "library.json"
+        save_library_json(test_constructs, output)
         assert output.exists()
 
-    def test_file_has_header(self, test_constructs, temp_dir: Path):
-        output = temp_dir / "library.csv"
-        save_library_csv(test_constructs, output)
-        content = output.read_text()
-        assert "index" in content
-        assert "sequence" in content
-        assert "structure" in content
+    def test_valid_json(self, test_constructs, temp_dir: Path):
+        output = temp_dir / "library.json"
+        save_library_json(test_constructs, output)
+        with open(output) as f:
+            data = json.load(f)
+        assert isinstance(data, list)
+        assert len(data) == 3
 
-    def test_file_has_correct_rows(self, test_constructs, temp_dir: Path):
-        output = temp_dir / "library.csv"
-        save_library_csv(test_constructs, output)
-        lines = output.read_text().strip().split("\n")
-        assert len(lines) == 4
+    def test_json_structure(self, test_constructs, temp_dir: Path):
+        output = temp_dir / "library.json"
+        save_library_json(test_constructs, output)
+        with open(output) as f:
+            data = json.load(f)
+        assert "index" in data[0]
+        assert "sequence" in data[0]
+        assert "structure" in data[0]
+        assert "motifs" in data[0]
 
     def test_accepts_string_path(self, test_constructs, temp_dir: Path):
-        output = str(temp_dir / "library.csv")
-        save_library_csv(test_constructs, output)
+        output = str(temp_dir / "library.json")
+        save_library_json(test_constructs, output)
         assert Path(output).exists()
 
 
-class TestLoadLibraryCsv:
-    """Tests for load_library_csv function."""
+class TestLoadLibraryJson:
+    """Tests for load_library_json function."""
 
     def test_loads_saved_library(self, test_constructs, temp_dir: Path):
-        output = temp_dir / "library.csv"
-        save_library_csv(test_constructs, output)
-        rows = load_library_csv(output)
+        output = temp_dir / "library.json"
+        save_library_json(test_constructs, output)
+        rows = load_library_json(output)
         assert len(rows) == 3
 
     def test_row_structure(self, test_constructs, temp_dir: Path):
-        output = temp_dir / "library.csv"
-        save_library_csv(test_constructs, output)
-        rows = load_library_csv(output)
+        output = temp_dir / "library.json"
+        save_library_json(test_constructs, output)
+        rows = load_library_json(output)
         assert "sequence" in rows[0]
         assert "structure" in rows[0]
+        assert "motifs" in rows[0]
+
+    def test_motifs_data(self, test_constructs, temp_dir: Path):
+        output = temp_dir / "library.json"
+        save_library_json(test_constructs, output)
+        rows = load_library_json(output)
+        assert isinstance(rows[0]["motifs"], list)
+        assert rows[0]["motifs"][0]["sequence"] == "GAC&GC"
 
     def test_nonexistent_file(self, temp_dir: Path):
         with pytest.raises(FileNotFoundError):
-            load_library_csv(temp_dir / "nonexistent.csv")
+            load_library_json(temp_dir / "nonexistent.json")
 
 
 class TestSaveSequencesTxt:

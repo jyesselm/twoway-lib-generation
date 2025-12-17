@@ -28,6 +28,7 @@ class GenerationStats:
     candidates_rejected_length: int
     candidates_rejected_validation: int
     final_library_size: int
+    motif_usage: dict[str, int] | None = None
 
 
 class LibraryGenerator:
@@ -56,6 +57,7 @@ class LibraryGenerator:
         self.motifs = motifs
         self.rng = Random(seed)
         self.stats = GenerationStats(0, 0, 0, 0, 0)
+        self._motif_usage: dict[str, int] = {m.sequence: 0 for m in motifs}
 
     def generate(self, num_candidates: int) -> list[Construct]:
         """
@@ -68,6 +70,7 @@ class LibraryGenerator:
             List of selected diverse constructs.
         """
         self.stats = GenerationStats(0, 0, 0, 0, 0)
+        self._motif_usage = {m.sequence: 0 for m in self.motifs}
 
         logger.info(f"Generating {num_candidates} candidate constructs...")
         candidates = self._generate_candidates(num_candidates)
@@ -75,6 +78,7 @@ class LibraryGenerator:
 
         if len(candidates) <= self.config.optimization.target_library_size:
             self.stats.final_library_size = len(candidates)
+            self.stats.motif_usage = dict(self._motif_usage)
             return candidates
 
         logger.info("Selecting diverse subset with simulated annealing...")
@@ -82,7 +86,22 @@ class LibraryGenerator:
         logger.info(f"Selected {len(selected)} constructs")
 
         self.stats.final_library_size = len(selected)
+        self._update_usage_for_selected(selected)
         return selected
+
+    def _update_usage_for_selected(self, selected: list[Construct]) -> None:
+        """Update motif usage stats for selected constructs."""
+        usage: dict[str, int] = {m.sequence: 0 for m in self.motifs}
+        for construct in selected:
+            for motif in construct.motifs:
+                key = motif.sequence
+                if key in usage:
+                    usage[key] += 1
+                else:
+                    flipped_key = motif.flip().sequence
+                    if flipped_key in usage:
+                        usage[flipped_key] += 1
+        self.stats.motif_usage = usage
 
     def _generate_candidates(self, count: int) -> list[Construct]:
         """Generate valid candidate constructs."""
@@ -117,14 +136,34 @@ class LibraryGenerator:
         return construct
 
     def _select_motifs(self, count: int) -> list[Motif]:
-        """Select random motifs for a construct, optionally flipping."""
+        """Select motifs with preference for less-used ones, optionally flipping."""
         selected = []
         for _ in range(count):
-            motif = self.rng.choice(self.motifs)
+            motif = self._select_weighted_motif()
             if self.config.allow_motif_flip and self.rng.random() < 0.5:
                 motif = motif.flip()
             selected.append(motif)
+            self._motif_usage[motif.sequence] = self._motif_usage.get(motif.sequence, 0) + 1
         return selected
+
+    def _select_weighted_motif(self) -> Motif:
+        """Select a motif with higher probability for less-used ones."""
+        if not self._motif_usage or all(v == 0 for v in self._motif_usage.values()):
+            return self.rng.choice(self.motifs)
+
+        max_usage = max(self._motif_usage.values()) + 1
+        weights = [max_usage - self._motif_usage.get(m.sequence, 0) for m in self.motifs]
+        total = sum(weights)
+        if total == 0:
+            return self.rng.choice(self.motifs)
+
+        r = self.rng.random() * total
+        cumulative = 0
+        for motif, weight in zip(self.motifs, weights):
+            cumulative += weight
+            if r <= cumulative:
+                return motif
+        return self.motifs[-1]
 
     def _assemble_with_length_constraint(
         self,

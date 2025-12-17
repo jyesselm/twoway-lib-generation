@@ -100,6 +100,43 @@ class TestGenerateLibrary:
         assert len(constructs) > 0
 
 
+class TestMotifUsageTracking:
+    """Tests for motif usage tracking."""
+
+    def test_stats_include_motif_usage(self, generation_config, test_motifs):
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator.generate(num_candidates=50)
+        assert generator.stats.motif_usage is not None
+        assert isinstance(generator.stats.motif_usage, dict)
+
+    def test_usage_tracks_all_motifs(self, generation_config, test_motifs):
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator.generate(num_candidates=50)
+        # All input motif sequences should be in usage dict
+        for motif in test_motifs:
+            assert motif.sequence in generator.stats.motif_usage
+
+    def test_usage_is_relatively_balanced(self, generation_config, test_motifs):
+        """Test that motif usage is somewhat balanced (not perfect, but reasonable)."""
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator.generate(num_candidates=100)
+
+        usage = generator.stats.motif_usage
+        if not usage:
+            return
+
+        used_counts = [v for v in usage.values() if v > 0]
+        if len(used_counts) < 2:
+            return
+
+        # The ratio of max to min usage should be reasonable (less than 5x)
+        max_usage = max(used_counts)
+        min_usage = min(used_counts)
+        if min_usage > 0:
+            ratio = max_usage / min_usage
+            assert ratio < 5, f"Usage imbalance too high: {ratio}"
+
+
 class TestEstimateFeasibleLengths:
     """Tests for estimate_feasible_lengths function."""
 
