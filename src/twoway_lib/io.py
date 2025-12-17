@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from twoway_lib.construct import Construct
+from twoway_lib.diversity import calculate_diversity_score
 
 
 def save_library_json(constructs: list[Construct], path: Path | str) -> None:
@@ -124,6 +125,7 @@ def get_library_summary(constructs: list[Construct]) -> dict:
 
     lengths = [c.length() for c in constructs]
     num_motifs = [len(c.motifs) for c in constructs]
+    sequences = [c.sequence for c in constructs]
 
     all_motifs = []
     motif_counts: dict[str, int] = {}
@@ -134,6 +136,9 @@ def get_library_summary(constructs: list[Construct]) -> dict:
 
     unique_motifs = len(set(all_motifs))
     used_counts = [v for v in motif_counts.values() if v > 0]
+
+    # Calculate average edit distance diversity
+    avg_edit_distance = calculate_diversity_score(sequences)
 
     return {
         "count": len(constructs),
@@ -147,4 +152,5 @@ def get_library_summary(constructs: list[Construct]) -> dict:
         "motif_usage_min": min(used_counts) if used_counts else 0,
         "motif_usage_max": max(used_counts) if used_counts else 0,
         "motif_usage_mean": sum(used_counts) / len(used_counts) if used_counts else 0,
+        "avg_edit_distance": avg_edit_distance,
     }

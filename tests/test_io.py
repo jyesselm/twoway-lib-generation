@@ -176,3 +176,8 @@ class TestGetLibrarySummary:
         assert "unique_motifs_used" in summary
         assert "total_motif_usages" in summary
         assert summary["total_motif_usages"] == 4
+
+    def test_edit_distance_stats(self, test_constructs):
+        summary = get_library_summary(test_constructs)
+        assert "avg_edit_distance" in summary
+        assert summary["avg_edit_distance"] >= 0

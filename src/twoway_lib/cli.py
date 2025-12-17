@@ -235,6 +235,7 @@ def _print_summary(constructs: list) -> None:
             f"  Motif usage range: {summary['motif_usage_min']}-{summary['motif_usage_max']} "
             f"(avg: {summary['motif_usage_mean']:.1f})"
         )
+        click.echo(f"  Average edit distance: {summary['avg_edit_distance']:.1f}")
 
 
 if __name__ == "__main__":
