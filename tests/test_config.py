@@ -164,10 +164,12 @@ class TestValidateConfig:
         with pytest.raises(ValueError, match="invalid nucleotides"):
             validate_config(sample_config)
 
-    def test_hairpin_sequence_length_mismatch(self, sample_config: LibraryConfig):
-        sample_config.hairpin_sequence = "GAA"  # 3 nt, but hairpin_loop_length is 4
-        with pytest.raises(ValueError, match="length.*must match"):
-            validate_config(sample_config)
+    def test_hairpin_sequence_derives_length(self, sample_config: LibraryConfig):
+        # Length is derived from sequence, so setting sequence updates length
+        sample_config.hairpin_sequence = "GAAA"
+        sample_config.__post_init__()  # Re-run to derive length
+        assert sample_config.hairpin_loop_length == 4
+        validate_config(sample_config)  # Should not raise
 
 
 class TestGenerateDefaultConfig:

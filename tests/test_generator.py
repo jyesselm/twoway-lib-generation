@@ -50,37 +50,37 @@ class TestLibraryGenerator:
     """Tests for LibraryGenerator class."""
 
     def test_init(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs)
+        generator = LibraryGenerator(generation_config, test_motifs, filter_motifs=False)
         assert generator.config == generation_config
         assert len(generator.motifs) == 4
 
     def test_generate_produces_constructs(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         constructs = generator.generate(num_candidates=50)
         assert len(constructs) > 0
 
     def test_generate_respects_length_constraints(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         constructs = generator.generate(num_candidates=50)
         for c in constructs:
             assert generation_config.target_length_min <= c.length()
             assert c.length() <= generation_config.target_length_max
 
     def test_generate_with_seed_reproducible(self, generation_config, test_motifs):
-        gen1 = LibraryGenerator(generation_config, test_motifs, seed=42)
-        gen2 = LibraryGenerator(generation_config, test_motifs, seed=42)
+        gen1 = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
+        gen2 = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         c1 = gen1.generate(num_candidates=20)
         c2 = gen2.generate(num_candidates=20)
         assert [c.sequence for c in c1] == [c.sequence for c in c2]
 
     def test_stats_tracked(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         generator.generate(num_candidates=50)
         assert generator.stats.candidates_generated > 0
         assert generator.stats.candidates_valid >= 0
 
     def test_constructs_have_motifs(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         constructs = generator.generate(num_candidates=50)
         for c in constructs:
             assert len(c.motifs) >= generation_config.motifs_per_construct_min
@@ -104,13 +104,13 @@ class TestMotifUsageTracking:
     """Tests for motif usage tracking."""
 
     def test_stats_include_motif_usage(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         generator.generate(num_candidates=50)
         assert generator.stats.motif_usage is not None
         assert isinstance(generator.stats.motif_usage, dict)
 
     def test_usage_tracks_all_motifs(self, generation_config, test_motifs):
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         generator.generate(num_candidates=50)
         # All input motif sequences should be in usage dict
         for motif in test_motifs:
@@ -118,7 +118,7 @@ class TestMotifUsageTracking:
 
     def test_usage_is_relatively_balanced(self, generation_config, test_motifs):
         """Test that motif usage is somewhat balanced (not perfect, but reasonable)."""
-        generator = LibraryGenerator(generation_config, test_motifs, seed=42)
+        generator = LibraryGenerator(generation_config, test_motifs, seed=42, filter_motifs=False)
         generator.generate(num_candidates=100)
 
         usage = generator.stats.motif_usage

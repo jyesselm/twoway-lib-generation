@@ -12,8 +12,10 @@ from twoway_lib.config import (
     save_config,
 )
 from twoway_lib.generator import LibraryGenerator, estimate_feasible_lengths
+from twoway_lib.helix import random_helix
 from twoway_lib.io import get_library_summary, save_library_json
-from twoway_lib.motif import load_motifs
+from twoway_lib.motif import Motif, load_motifs
+from twoway_lib.validation import fold_sequence
 
 
 @click.group()
@@ -34,6 +36,33 @@ def cli() -> None:
     "-s", "--seed", type=int, default=None, help="Random seed for reproducibility"
 )
 @click.option("-v", "--verbose", is_flag=True, help="Enable verbose logging")
+@click.option(
+    "--no-filter-motifs",
+    is_flag=True,
+    help="Don't filter motifs by fold test (use all motifs)",
+)
+@click.option(
+    "--no-color",
+    is_flag=True,
+    help="Disable colored output (for saving to file)",
+)
+@click.option(
+    "--log-json",
+    type=click.Path(),
+    default=None,
+    help="Save log output to JSON file",
+)
+@click.option(
+    "--max-attempts",
+    type=int,
+    default=None,
+    help="Maximum generation attempts (default: num_candidates * 100)",
+)
+@click.option(
+    "--auto-tune",
+    is_flag=True,
+    help="Auto-tune simulated annealing parameters before optimization",
+)
 def generate(
     config_path: str,
     motifs_path: str,
@@ -41,6 +70,11 @@ def generate(
     num_candidates: int,
     seed: int | None,
     verbose: bool,
+    no_filter_motifs: bool,
+    no_color: bool,
+    log_json: str | None,
+    max_attempts: int | None,
+    auto_tune: bool,
 ) -> None:
     """
     Generate a two-way junction library.
@@ -48,7 +82,7 @@ def generate(
     CONFIG_PATH: Path to YAML configuration file
     MOTIFS_PATH: Path to CSV file with motifs
     """
-    _setup_logging(verbose)
+    log_collector = _setup_logging(verbose, no_color, log_json)
     log = structlog.get_logger()
 
     try:
@@ -57,16 +91,22 @@ def generate(
         log.info("Loaded config", path=config_path)
         log.info("Loaded motifs", count=len(motifs), path=motifs_path)
 
-        generator = LibraryGenerator(config, motifs, seed=seed)
-        constructs = generator.generate(num_candidates)
+        generator = LibraryGenerator(
+            config, motifs, seed=seed, filter_motifs=not no_filter_motifs
+        )
+        constructs = generator.generate(
+            num_candidates, max_attempts=max_attempts, auto_tune=auto_tune
+        )
 
         save_library_json(constructs, output)
         log.info("Saved constructs", count=len(constructs), path=output)
 
         _print_summary(constructs)
+        log_collector.save()
 
     except Exception as e:
         log.error("Error during generation", error=str(e))
+        log_collector.save()
         sys.exit(1)
 
 
@@ -192,22 +232,250 @@ def primers() -> None:
     click.echo("Use p5_name or p3_name in your config file to reference these by name.")
 
 
-def _setup_logging(verbose: bool) -> None:
+@cli.command("test-motifs")
+@click.argument("motifs_path", type=click.Path(exists=True))
+@click.option(
+    "-r", "--repeats", default=10, help="Number of times to repeat motif in test construct"
+)
+@click.option(
+    "-l", "--helix-length", default=3, help="Length of flanking helices"
+)
+@click.option(
+    "-s", "--seed", type=int, default=42, help="Random seed for helix generation"
+)
+@click.option("-v", "--verbose", is_flag=True, help="Show detailed mismatch info")
+def test_motifs(
+    motifs_path: str,
+    repeats: int,
+    helix_length: int,
+    seed: int,
+    verbose: bool,
+) -> None:
+    """
+    Test each motif for correct folding in a helix context.
+
+    Embeds each motif multiple times in a hairpin construct with random helices
+    and checks if Vienna RNA predicts the designed structure.
+
+    MOTIFS_PATH: Path to CSV file with motifs
+    """
+    from random import Random
+
+    motifs = load_motifs(motifs_path)
+    rng = Random(seed)
+
+    click.echo(f"Testing {len(motifs)} motifs with {repeats} repeats each")
+    click.echo(f"Helix length: {helix_length} bp")
+    click.echo("=" * 70)
+    click.echo()
+
+    results = []
+    for motif in motifs:
+        result = _test_single_motif(motif, repeats, helix_length, rng, verbose)
+        results.append(result)
+
+    # Summary
+    click.echo()
+    click.echo("=" * 70)
+    click.echo("SUMMARY")
+    click.echo("=" * 70)
+
+    passing = [r for r in results if r["passes"]]
+    failing = [r for r in results if not r["passes"]]
+
+    click.echo(f"Passing motifs: {len(passing)}/{len(results)}")
+    click.echo(f"Failing motifs: {len(failing)}/{len(results)}")
+
+    if failing:
+        click.echo()
+        click.echo("Failing motifs (structure mismatch in motif region):")
+        for r in failing:
+            click.echo(f"  {r['motif']:20s} match: {r['motif_match']:.1%}")
+
+
+def _test_single_motif(
+    motif: Motif,
+    repeats: int,
+    helix_length: int,
+    rng,
+    verbose: bool,
+) -> dict:
+    """Test a single motif by embedding it in a hairpin construct."""
+    # Build test construct: helix + (motif + helix) * repeats + loop
+    seq_parts = []
+    ss_parts = []
+
+    # Generate helices
+    helices = [random_helix(helix_length, rng) for _ in range(repeats + 1)]
+
+    # Build 5' arm: helix + motif_strand1 + helix + ...
+    for i in range(repeats):
+        seq_parts.append(helices[i].strand1)
+        ss_parts.append(helices[i].structure1)
+        seq_parts.append(motif.strand1_seq)
+        ss_parts.append(motif.strand1_ss)
+
+    # Final helix before loop
+    seq_parts.append(helices[repeats].strand1)
+    ss_parts.append(helices[repeats].structure1)
+
+    # Hairpin loop
+    seq_parts.append("GAAA")
+    ss_parts.append("....")
+
+    # Build 3' arm: helix + motif_strand2 + helix + ... (reversed)
+    seq_parts.append(helices[repeats].strand2)
+    ss_parts.append(helices[repeats].structure2)
+
+    for i in range(repeats - 1, -1, -1):
+        seq_parts.append(motif.strand2_seq)
+        ss_parts.append(motif.strand2_ss)
+        seq_parts.append(helices[i].strand2)
+        ss_parts.append(helices[i].structure2)
+
+    sequence = "".join(seq_parts)
+    designed_ss = "".join(ss_parts)
+
+    # Fold and compare
+    fold_result = fold_sequence(sequence)
+    predicted_ss = fold_result.predicted_structure
+
+    # Calculate overall match
+    total_match = sum(1 for d, p in zip(designed_ss, predicted_ss) if d == p)
+    match_pct = total_match / len(designed_ss)
+
+    # Calculate match per motif instance and collect mismatch info
+    motif_positions = _find_motif_positions(
+        helices, motif, repeats, helix_length
+    )
+
+    instances_failed = 0
+    motif_matches = 0
+    motif_total = 0
+    mismatch_examples = []
+
+    for idx, (start, end) in enumerate(motif_positions):
+        instance_match = True
+        for j in range(start, end):
+            motif_total += 1
+            if designed_ss[j] == predicted_ss[j]:
+                motif_matches += 1
+            else:
+                instance_match = False
+
+        if not instance_match:
+            instances_failed += 1
+            if len(mismatch_examples) < 2:
+                mismatch_examples.append({
+                    "seq": sequence[start:end],
+                    "designed": designed_ss[start:end],
+                    "predicted": predicted_ss[start:end],
+                })
+
+    motif_match_pct = motif_matches / motif_total if motif_total > 0 else 1.0
+    passes = motif_match_pct == 1.0
+
+    # Build output line
+    status = "PASS" if passes else "FAIL"
+    if passes:
+        click.echo(f"{motif.sequence:15s} {status}")
+    else:
+        # Show designed vs predicted structure for this motif
+        click.echo(
+            f"{motif.sequence:15s} {status}  "
+            f"failed {instances_failed}/{len(motif_positions)} instances  "
+            f"designed: {motif.structure}  predicted: {mismatch_examples[0]['predicted']}"
+        )
+
+    if verbose and not passes:
+        click.echo(f"  Example: seq={mismatch_examples[0]['seq']}  "
+                   f"designed={mismatch_examples[0]['designed']}  "
+                   f"predicted={mismatch_examples[0]['predicted']}")
+        click.echo()
+
+    return {
+        "motif": motif.sequence,
+        "passes": passes,
+        "overall_match": match_pct,
+        "motif_match": motif_match_pct,
+        "instances_failed": instances_failed,
+        "total_instances": len(motif_positions),
+    }
+
+
+def _find_motif_positions(
+    helices: list,
+    motif: Motif,
+    repeats: int,
+    helix_length: int,
+) -> list[tuple[int, int]]:
+    """Find start/end positions of motif regions in the test construct."""
+    positions = []
+    motif_s1_len = len(motif.strand1_seq)
+    motif_s2_len = len(motif.strand2_seq)
+
+    # 5' arm motif positions
+    pos = 0
+    for i in range(repeats):
+        pos += helix_length  # helix
+        positions.append((pos, pos + motif_s1_len))
+        pos += motif_s1_len
+
+    # Skip final helix + loop + final helix
+    pos += helix_length + 4 + helix_length
+
+    # 3' arm motif positions (reverse order)
+    for i in range(repeats):
+        positions.append((pos, pos + motif_s2_len))
+        pos += motif_s2_len + helix_length
+
+    return positions
+
+
+class LogCollector:
+    """Collects log entries for JSON output."""
+
+    def __init__(self, output_path: str | None):
+        self.output_path = output_path
+        self.entries: list[dict] = []
+
+    def __call__(self, logger, method_name, event_dict):
+        """Processor that collects log entries."""
+        if self.output_path:
+            self.entries.append(dict(event_dict))
+        return event_dict
+
+    def save(self):
+        """Save collected logs to JSON file."""
+        if self.output_path and self.entries:
+            import json
+
+            with open(self.output_path, "w") as f:
+                json.dump(self.entries, f, indent=2, default=str)
+
+
+def _setup_logging(
+    verbose: bool, no_color: bool = False, log_json: str | None = None
+) -> LogCollector:
     """Configure structlog based on verbosity."""
     import logging
 
     level = logging.DEBUG if verbose else logging.INFO
+    collector = LogCollector(log_json)
+
+    processors = [
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="%H:%M:%S", utc=False),
+        collector,
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.dev.ConsoleRenderer(sort_keys=False, colors=not no_color),
+    ]
 
     structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="%H:%M:%S"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.dev.ConsoleRenderer(),
-        ],
+        processors=processors,
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -218,6 +486,8 @@ def _setup_logging(verbose: bool) -> None:
         format="%(message)s",
         level=level,
     )
+
+    return collector
 
 
 def _print_config_summary(config) -> None:

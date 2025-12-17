@@ -32,6 +32,9 @@ class OptimizationConfig:
     initial_temperature: float = 10.0
     cooling_rate: float = 0.00001
     target_library_size: int = 3000
+    min_motif_usage: int | None = None
+    max_motif_usage: int | None = None
+    motif_usage_weight: float = 1.0  # Weight of motif balance vs diversity
 
 
 @dataclass
@@ -47,17 +50,23 @@ class LibraryConfig:
     p3_sequence: str
     p3_structure: str
     helix_length: int = 3
-    hairpin_loop_length: int = 4
+    hairpin_loop_length: int | None = None  # Derived from hairpin_sequence if provided
     hairpin_sequence: str | None = None
     hairpin_structure: str | None = None
     allow_motif_flip: bool = False
+    allow_wobble_pairs: bool = False  # Allow G-U/U-G pairs in helices
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
 
     def __post_init__(self) -> None:
-        """Validate hairpin_sequence if provided."""
+        """Validate and derive hairpin_loop_length from hairpin_sequence."""
         if self.hairpin_sequence is not None:
             self.hairpin_sequence = self.hairpin_sequence.upper().replace("T", "U")
+            # Derive length from sequence
+            self.hairpin_loop_length = len(self.hairpin_sequence)
+        elif self.hairpin_loop_length is None:
+            # Default to 4 if neither specified
+            self.hairpin_loop_length = 4
 
     @property
     def target_length(self) -> tuple[int, int]:
@@ -150,6 +159,7 @@ def _parse_config_dict(data: dict[str, Any]) -> LibraryConfig:
         hairpin_sequence=data.get("hairpin_sequence"),
         hairpin_structure=data.get("hairpin_structure"),
         allow_motif_flip=data.get("allow_motif_flip", False),
+        allow_wobble_pairs=data.get("allow_wobble_pairs", False),
         validation=validation,
         optimization=optimization,
     )
@@ -194,6 +204,9 @@ def _parse_optimization_config(data: dict[str, Any]) -> OptimizationConfig:
         initial_temperature=data.get("initial_temperature", 10.0),
         cooling_rate=data.get("cooling_rate", 0.00001),
         target_library_size=data.get("target_library_size", 3000),
+        min_motif_usage=data.get("min_motif_usage"),
+        max_motif_usage=data.get("max_motif_usage"),
+        motif_usage_weight=data.get("motif_usage_weight", 1.0),
     )
 
 
@@ -295,21 +308,11 @@ def _validate_hairpin_sequence(config: LibraryConfig) -> None:
         invalid = set(config.hairpin_sequence.upper()) - valid_nts
         if invalid:
             raise ValueError(f"hairpin_sequence contains invalid nucleotides: {invalid}")
-        if len(config.hairpin_sequence) != config.hairpin_loop_length:
-            raise ValueError(
-                f"hairpin_sequence length ({len(config.hairpin_sequence)}) must match "
-                f"hairpin_loop_length ({config.hairpin_loop_length})"
-            )
 
     if config.hairpin_structure is not None:
         invalid = set(config.hairpin_structure) - valid_ss
         if invalid:
             raise ValueError(f"hairpin_structure contains invalid characters: {invalid}")
-        if len(config.hairpin_structure) != config.hairpin_loop_length:
-            raise ValueError(
-                f"hairpin_structure length ({len(config.hairpin_structure)}) must match "
-                f"hairpin_loop_length ({config.hairpin_loop_length})"
-            )
 
     # If both provided, they must have same length
     if config.hairpin_sequence and config.hairpin_structure:
@@ -377,6 +380,8 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
         data["hairpin_structure"] = config.hairpin_structure
     if config.allow_motif_flip:
         data["allow_motif_flip"] = config.allow_motif_flip
+    if config.allow_wobble_pairs:
+        data["allow_wobble_pairs"] = config.allow_wobble_pairs
     data["validation"] = {
         "enabled": config.validation.enabled,
         "max_ensemble_defect": config.validation.max_ensemble_defect,
@@ -387,12 +392,19 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
         "avoid_consecutive_gc_pairs": config.validation.avoid_consecutive_gc_pairs,
         "max_consecutive_gc_pairs": config.validation.max_consecutive_gc_pairs,
     }
-    data["optimization"] = {
+    opt_data: dict[str, Any] = {
         "iterations": config.optimization.iterations,
         "initial_temperature": config.optimization.initial_temperature,
         "cooling_rate": config.optimization.cooling_rate,
         "target_library_size": config.optimization.target_library_size,
     }
+    if config.optimization.min_motif_usage is not None:
+        opt_data["min_motif_usage"] = config.optimization.min_motif_usage
+    if config.optimization.max_motif_usage is not None:
+        opt_data["max_motif_usage"] = config.optimization.max_motif_usage
+    if config.optimization.motif_usage_weight != 1.0:
+        opt_data["motif_usage_weight"] = config.optimization.motif_usage_weight
+    data["optimization"] = opt_data
     return data
 
 

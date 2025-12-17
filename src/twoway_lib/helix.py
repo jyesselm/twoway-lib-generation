@@ -9,6 +9,12 @@ from rna_secstruct import SecStruct
 # Standard Watson-Crick base pairs
 WC_PAIRS: list[tuple[str, str]] = [("A", "U"), ("U", "A"), ("G", "C"), ("C", "G")]
 
+# Wobble pairs (G-U and U-G)
+WOBBLE_PAIRS: list[tuple[str, str]] = [("G", "U"), ("U", "G")]
+
+# All valid base pairs including wobble
+ALL_PAIRS: list[tuple[str, str]] = WC_PAIRS + WOBBLE_PAIRS
+
 
 @dataclass(frozen=True)
 class Helix:
@@ -67,14 +73,16 @@ class Helix:
         return self._strand2_ss
 
 
-def generate_all_helices(length: int) -> list[Helix]:
+def generate_all_helices(length: int, allow_wobble: bool = False) -> list[Helix]:
     """
     Generate all possible Watson-Crick helices of given length.
 
     For length n, generates 4^n helices (all combinations of 4 base pairs).
+    With wobble pairs enabled, generates 6^n helices.
 
     Args:
         length: Number of base pairs in the helix.
+        allow_wobble: If True, include G-U/U-G wobble pairs.
 
     Returns:
         List of all possible Helix objects.
@@ -85,8 +93,9 @@ def generate_all_helices(length: int) -> list[Helix]:
     if length < 1:
         raise ValueError("Helix length must be at least 1")
 
+    pairs = ALL_PAIRS if allow_wobble else WC_PAIRS
     helices = []
-    for bp_combo in product(WC_PAIRS, repeat=length):
+    for bp_combo in product(pairs, repeat=length):
         helix = _create_helix_from_pairs(bp_combo)
         helices.append(helix)
 
@@ -111,13 +120,16 @@ def _create_helix_from_pairs(bp_combo: tuple[tuple[str, str], ...]) -> Helix:
     return Helix.from_sequences(strand1, strand2, structure1, structure2)
 
 
-def random_helix(length: int, rng: Random | None = None) -> Helix:
+def random_helix(
+    length: int, rng: Random | None = None, allow_wobble: bool = False
+) -> Helix:
     """
     Generate a random Watson-Crick helix.
 
     Args:
         length: Number of base pairs in the helix.
         rng: Random number generator (uses default if None).
+        allow_wobble: If True, include G-U/U-G wobble pairs.
 
     Returns:
         Randomly generated Helix object.
@@ -131,7 +143,8 @@ def random_helix(length: int, rng: Random | None = None) -> Helix:
     if rng is None:
         rng = Random()
 
-    bp_combo = tuple(rng.choice(WC_PAIRS) for _ in range(length))
+    pairs = ALL_PAIRS if allow_wobble else WC_PAIRS
+    bp_combo = tuple(rng.choice(pairs) for _ in range(length))
     return _create_helix_from_pairs(bp_combo)
 
 

@@ -5,7 +5,9 @@ from random import Random
 import pytest
 
 from twoway_lib.helix import (
+    ALL_PAIRS,
     Helix,
+    WOBBLE_PAIRS,
     generate_all_helices,
     helix_from_strand1,
     random_helix,
@@ -122,3 +124,62 @@ class TestHelixFromStrand1:
     def test_invalid_nucleotide(self):
         with pytest.raises(ValueError, match="Invalid nucleotide"):
             helix_from_strand1("AXG")
+
+
+class TestWobblePairs:
+    """Tests for G-U wobble pair support."""
+
+    def test_wobble_pairs_constant(self):
+        assert WOBBLE_PAIRS == [("G", "U"), ("U", "G")]
+
+    def test_all_pairs_includes_wobble(self):
+        assert len(ALL_PAIRS) == 6
+        assert ("G", "U") in ALL_PAIRS
+        assert ("U", "G") in ALL_PAIRS
+
+    def test_generate_all_helices_with_wobble(self):
+        # Without wobble: 4^1 = 4
+        helices_wc = generate_all_helices(1, allow_wobble=False)
+        assert len(helices_wc) == 4
+
+        # With wobble: 6^1 = 6
+        helices_wobble = generate_all_helices(1, allow_wobble=True)
+        assert len(helices_wobble) == 6
+
+    def test_generate_all_helices_length_2_with_wobble(self):
+        # With wobble: 6^2 = 36
+        helices = generate_all_helices(2, allow_wobble=True)
+        assert len(helices) == 36
+
+    def test_random_helix_with_wobble(self):
+        rng = Random(42)
+        # Generate many helices with wobble to check GU pairs can appear
+        strands1 = set()
+        strands2 = set()
+        for _ in range(100):
+            helix = random_helix(3, rng, allow_wobble=True)
+            strands1.add(helix.strand1)
+            strands2.add(helix.strand2)
+
+        # With wobble pairs, we should see G-U combinations
+        # Strand1 can have G pairing with U in strand2
+        all_chars1 = "".join(strands1)
+        all_chars2 = "".join(strands2)
+        assert "G" in all_chars1 and "U" in all_chars2
+
+    def test_random_helix_without_wobble_no_gu_pairs(self):
+        rng = Random(42)
+        # Generate helices without wobble - no G-U base pairs
+        for _ in range(50):
+            helix = random_helix(3, rng, allow_wobble=False)
+            # Each position should have WC pairs only
+            for s1, s2 in zip(helix.strand1, reversed(helix.strand2)):
+                pair = (s1, s2)
+                assert pair not in WOBBLE_PAIRS
+
+    def test_wobble_helix_structure(self):
+        # G-U pairs should still use ( and ) structure
+        helices = generate_all_helices(2, allow_wobble=True)
+        for h in helices:
+            assert h.structure1 == "(("
+            assert h.structure2 == "))"

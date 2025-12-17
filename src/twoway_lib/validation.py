@@ -8,6 +8,7 @@ from rna_secstruct import SecStruct
 
 if TYPE_CHECKING:
     from twoway_lib.construct import Construct
+    from twoway_lib.motif import Motif
 
 
 @dataclass
@@ -310,6 +311,278 @@ def _find_gc_pair_runs(sequence: str, structure: str) -> list[int]:
             gc_runs.append(run_length)
 
     return gc_runs
+
+
+def test_motif_folding(
+    motif: "Motif",
+    helix_length: int = 3,
+    repeats: int = 5,
+    seed: int = 42,
+) -> tuple[bool, float]:
+    """
+    Test if a motif folds correctly when embedded in a helix context.
+
+    Builds a test construct with the motif repeated multiple times
+    between random helices, folds it, and checks if the motif regions
+    match the designed structure.
+
+    Args:
+        motif: Motif to test.
+        helix_length: Length of flanking helices.
+        repeats: Number of times to repeat motif in test construct.
+        seed: Random seed for helix generation.
+
+    Returns:
+        Tuple of (passes, match_fraction) where passes is True if motif
+        regions match 100%, and match_fraction is the fraction of matching
+        positions in motif regions.
+    """
+    from random import Random
+
+    from twoway_lib.helix import random_helix
+
+    rng = Random(seed)
+
+    # Build test construct
+    seq_parts = []
+    ss_parts = []
+    helices = [random_helix(helix_length, rng) for _ in range(repeats + 1)]
+
+    # 5' arm
+    for i in range(repeats):
+        seq_parts.append(helices[i].strand1)
+        ss_parts.append(helices[i].structure1)
+        seq_parts.append(motif.strand1_seq)
+        ss_parts.append(motif.strand1_ss)
+
+    seq_parts.append(helices[repeats].strand1)
+    ss_parts.append(helices[repeats].structure1)
+
+    # Hairpin loop
+    seq_parts.append("GAAA")
+    ss_parts.append("....")
+
+    # 3' arm
+    seq_parts.append(helices[repeats].strand2)
+    ss_parts.append(helices[repeats].structure2)
+
+    for i in range(repeats - 1, -1, -1):
+        seq_parts.append(motif.strand2_seq)
+        ss_parts.append(motif.strand2_ss)
+        seq_parts.append(helices[i].strand2)
+        ss_parts.append(helices[i].structure2)
+
+    sequence = "".join(seq_parts)
+    designed_ss = "".join(ss_parts)
+
+    # Fold
+    fold_result = fold_sequence(sequence)
+    predicted_ss = fold_result.predicted_structure
+
+    # Find motif positions and check match
+    motif_s1_len = len(motif.strand1_seq)
+    motif_s2_len = len(motif.strand2_seq)
+
+    motif_matches = 0
+    motif_total = 0
+
+    # 5' arm motif positions
+    pos = 0
+    for i in range(repeats):
+        pos += helix_length
+        for j in range(motif_s1_len):
+            motif_total += 1
+            if designed_ss[pos + j] == predicted_ss[pos + j]:
+                motif_matches += 1
+        pos += motif_s1_len
+
+    # Skip final helix + loop + final helix
+    pos += helix_length + 4 + helix_length
+
+    # 3' arm motif positions
+    for i in range(repeats):
+        for j in range(motif_s2_len):
+            motif_total += 1
+            if designed_ss[pos + j] == predicted_ss[pos + j]:
+                motif_matches += 1
+        pos += motif_s2_len + helix_length
+
+    match_fraction = motif_matches / motif_total if motif_total > 0 else 1.0
+    passes = match_fraction == 1.0
+
+    return passes, match_fraction
+
+
+@dataclass
+class MotifFoldResult:
+    """Result of motif fold test."""
+
+    motif: "Motif"
+    passes: bool
+    match_fraction: float
+    instances_failed: int
+    total_instances: int
+    designed_ss: str
+    predicted_ss: str
+
+
+def filter_foldable_motifs(
+    motifs: list["Motif"],
+    helix_length: int = 3,
+    repeats: int = 5,
+    seed: int = 42,
+) -> tuple[list["Motif"], list["Motif"], list[MotifFoldResult]]:
+    """
+    Filter motifs to only those that fold correctly.
+
+    Args:
+        motifs: List of motifs to test.
+        helix_length: Length of flanking helices for test.
+        repeats: Number of repeats in test construct.
+        seed: Random seed for helix generation.
+
+    Returns:
+        Tuple of (passing_motifs, failing_motifs, failed_results).
+    """
+    passing = []
+    failing = []
+    failed_results = []
+
+    for motif in motifs:
+        result = test_motif_folding_detailed(motif, helix_length, repeats, seed)
+        if result.passes:
+            passing.append(motif)
+        else:
+            failing.append(motif)
+            failed_results.append(result)
+
+    return passing, failing, failed_results
+
+
+def test_motif_folding_detailed(
+    motif: "Motif",
+    helix_length: int = 3,
+    repeats: int = 5,
+    seed: int = 42,
+) -> MotifFoldResult:
+    """
+    Test if a motif folds correctly and return detailed results.
+
+    Args:
+        motif: Motif to test.
+        helix_length: Length of flanking helices.
+        repeats: Number of times to repeat motif in test construct.
+        seed: Random seed for helix generation.
+
+    Returns:
+        MotifFoldResult with detailed fold test information.
+    """
+    from random import Random
+
+    from twoway_lib.helix import random_helix
+
+    rng = Random(seed)
+
+    # Build test construct
+    seq_parts = []
+    ss_parts = []
+    helices = [random_helix(helix_length, rng) for _ in range(repeats + 1)]
+
+    # 5' arm
+    for i in range(repeats):
+        seq_parts.append(helices[i].strand1)
+        ss_parts.append(helices[i].structure1)
+        seq_parts.append(motif.strand1_seq)
+        ss_parts.append(motif.strand1_ss)
+
+    seq_parts.append(helices[repeats].strand1)
+    ss_parts.append(helices[repeats].structure1)
+
+    # Hairpin loop
+    seq_parts.append("GAAA")
+    ss_parts.append("....")
+
+    # 3' arm
+    seq_parts.append(helices[repeats].strand2)
+    ss_parts.append(helices[repeats].structure2)
+
+    for i in range(repeats - 1, -1, -1):
+        seq_parts.append(motif.strand2_seq)
+        ss_parts.append(motif.strand2_ss)
+        seq_parts.append(helices[i].strand2)
+        ss_parts.append(helices[i].structure2)
+
+    sequence = "".join(seq_parts)
+    designed_ss = "".join(ss_parts)
+
+    # Fold
+    fold_result = fold_sequence(sequence)
+    predicted_ss = fold_result.predicted_structure
+
+    # Find motif positions and check match
+    motif_s1_len = len(motif.strand1_seq)
+    motif_s2_len = len(motif.strand2_seq)
+
+    instances_failed = 0
+    motif_matches = 0
+    motif_total = 0
+
+    # Store positions for first instance of each strand
+    first_s1_pos = None
+    first_s2_pos = None
+
+    # 5' arm motif positions
+    pos = 0
+    for i in range(repeats):
+        pos += helix_length
+        if first_s1_pos is None:
+            first_s1_pos = pos
+        instance_match = True
+        for j in range(motif_s1_len):
+            motif_total += 1
+            if designed_ss[pos + j] == predicted_ss[pos + j]:
+                motif_matches += 1
+            else:
+                instance_match = False
+        if not instance_match:
+            instances_failed += 1
+        pos += motif_s1_len
+
+    # Skip final helix + loop + final helix
+    pos += helix_length + 4 + helix_length
+
+    # 3' arm motif positions
+    for i in range(repeats):
+        if first_s2_pos is None:
+            first_s2_pos = pos
+        instance_match = True
+        for j in range(motif_s2_len):
+            motif_total += 1
+            if designed_ss[pos + j] == predicted_ss[pos + j]:
+                motif_matches += 1
+            else:
+                instance_match = False
+        if not instance_match:
+            instances_failed += 1
+        pos += motif_s2_len + helix_length
+
+    match_fraction = motif_matches / motif_total if motif_total > 0 else 1.0
+    passes = match_fraction == 1.0
+
+    # Build predicted structure string matching motif format: strand1&strand2
+    pred_s1 = predicted_ss[first_s1_pos : first_s1_pos + motif_s1_len]
+    pred_s2 = predicted_ss[first_s2_pos : first_s2_pos + motif_s2_len]
+    predicted_motif_ss = f"{pred_s1}&{pred_s2}"
+
+    return MotifFoldResult(
+        motif=motif,
+        passes=passes,
+        match_fraction=match_fraction,
+        instances_failed=instances_failed,
+        total_instances=repeats * 2,  # repeats on each arm
+        designed_ss=motif.structure,
+        predicted_ss=predicted_motif_ss,
+    )
 
 
 def check_sequence_constraints(
