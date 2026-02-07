@@ -1,6 +1,7 @@
 """Simulated annealing optimizer for library selection."""
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from random import Random
 from typing import TYPE_CHECKING
@@ -66,7 +67,7 @@ class LibraryOptimizer:
         self.rng = Random(seed)
         self.sequences = [c.sequence for c in constructs]
         self.distance_matrix: np.ndarray | None = None
-        self._progress_callback: callable | None = None
+        self._progress_callback: Callable | None = None
 
         # Build motif usage mapping: construct index -> set of motif sequences
         self._construct_motifs: list[set[str]] = []
@@ -76,7 +77,7 @@ class LibraryOptimizer:
             self._construct_motifs.append(motif_seqs)
             self._all_motifs.update(motif_seqs)
 
-    def set_progress_callback(self, callback: callable) -> None:
+    def set_progress_callback(self, callback: Callable) -> None:
         """Set callback for progress updates."""
         self._progress_callback = callback
 
@@ -229,7 +230,11 @@ class LibraryOptimizer:
         best_energy = current_energy
 
         # Use provided params or fall back to config
-        temp_start = initial_temp if initial_temp is not None else self.config.initial_temperature
+        temp_start = (
+            initial_temp
+            if initial_temp is not None
+            else self.config.initial_temperature
+        )
         rate = cooling_rate if cooling_rate is not None else self.config.cooling_rate
 
         temperature = temp_start
@@ -313,35 +318,54 @@ class LibraryOptimizer:
 
     def _compute_motif_usage_penalty(self, indices: set[int]) -> float:
         """
-        Compute penalty for motif usage outside min/max bounds.
+        Compute penalty for motif usage outside bounds or away from target.
+
+        If target_motif_usage is set, penalizes (count - target)^2 for each motif.
+        Otherwise falls back to min/max penalty.
 
         Args:
             indices: Set of selected construct indices.
 
         Returns:
-            Penalty value (0 if all motifs within bounds).
+            Penalty value (0 if all motifs within bounds/at target).
         """
+        target = self.config.target_motif_usage
         min_usage = self.config.min_motif_usage
         max_usage = self.config.max_motif_usage
 
-        if min_usage is None and max_usage is None:
+        if target is None and min_usage is None and max_usage is None:
             return 0.0
 
-        # Count motif usage in selected constructs
-        usage_counts: dict[str, int] = {m: 0 for m in self._all_motifs}
+        usage_counts = self._count_motif_usage(indices)
+
+        penalty = 0.0
+        if target is not None:
+            for count in usage_counts.values():
+                penalty += (count - target) ** 2
+        else:
+            for count in usage_counts.values():
+                if min_usage is not None and count < min_usage:
+                    penalty += (min_usage - count) ** 2
+                if max_usage is not None and count > max_usage:
+                    penalty += (count - max_usage) ** 2
+
+        return penalty * self.config.motif_usage_weight
+
+    def _count_motif_usage(self, indices: set[int]) -> dict[str, int]:
+        """
+        Count motif usage in selected constructs.
+
+        Args:
+            indices: Set of selected construct indices.
+
+        Returns:
+            Dictionary mapping motif sequences to usage counts.
+        """
+        usage_counts: dict[str, int] = dict.fromkeys(self._all_motifs, 0)
         for idx in indices:
             for motif in self._construct_motifs[idx]:
                 usage_counts[motif] = usage_counts.get(motif, 0) + 1
-
-        # Calculate penalty for violations
-        penalty = 0.0
-        for motif, count in usage_counts.items():
-            if min_usage is not None and count < min_usage:
-                penalty += (min_usage - count) ** 2
-            if max_usage is not None and count > max_usage:
-                penalty += (count - max_usage) ** 2
-
-        return penalty * self.config.motif_usage_weight
+        return usage_counts
 
     def _propose_move(self, current: set[int]) -> set[int]:
         """

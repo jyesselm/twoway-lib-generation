@@ -148,6 +148,65 @@ def random_helix(
     return _create_helix_from_pairs(bp_combo)
 
 
+def has_wobble_pair(helix: Helix) -> bool:
+    """
+    Check if a helix contains at least one GU/UG wobble pair.
+
+    Args:
+        helix: Helix to check.
+
+    Returns:
+        True if helix has at least one wobble pair.
+    """
+    for s1, s2 in zip(helix.strand1, reversed(helix.strand2), strict=True):
+        if (s1, s2) in WOBBLE_PAIRS:
+            return True
+    return False
+
+
+def random_helix_with_gu_requirement(
+    length: int,
+    rng: Random | None = None,
+    require_gu: bool = True,
+) -> Helix:
+    """
+    Generate a random helix guaranteed to have >= 1 GU/UG pair.
+
+    Forces one random position to be a GU/UG pair, fills rest randomly
+    from all pairs (including wobble).
+
+    Args:
+        length: Number of base pairs in the helix.
+        rng: Random number generator (uses default if None).
+        require_gu: If True, guarantee at least one GU pair.
+
+    Returns:
+        Randomly generated Helix with at least one GU pair.
+
+    Raises:
+        ValueError: If length is less than 1.
+    """
+    if length < 1:
+        raise ValueError("Helix length must be at least 1")
+
+    if rng is None:
+        rng = Random()
+
+    if not require_gu:
+        return random_helix(length, rng, allow_wobble=True)
+
+    # Force one random position to be a wobble pair
+    forced_pos = rng.randint(0, length - 1)
+    pairs_list: list[tuple[str, str]] = []
+    for i in range(length):
+        if i == forced_pos:
+            pairs_list.append(rng.choice(WOBBLE_PAIRS))
+        else:
+            pairs_list.append(rng.choice(ALL_PAIRS))
+
+    return _create_helix_from_pairs(tuple(pairs_list))
+
+
 def helix_from_strand1(strand1: str) -> Helix:
     """
     Create a helix from the first strand sequence.

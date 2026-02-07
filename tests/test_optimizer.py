@@ -96,3 +96,43 @@ class TestSelectDiverseSubset:
             seed=42,
         )
         assert len(indices) == 10
+
+
+class TestTargetMotifUsage:
+    """Tests for target_motif_usage penalty."""
+
+    def test_target_usage_penalty(self, sample_constructs):
+        config = OptimizationConfig(
+            iterations=100,
+            target_library_size=5,
+            target_motif_usage=2,
+            motif_usage_weight=1.0,
+        )
+        optimizer = LibraryOptimizer(sample_constructs, config, seed=42)
+        optimizer._precompute_distances()
+        indices = set(range(5))
+        # Should compute penalty without error
+        energy = optimizer._compute_energy(indices)
+        assert isinstance(energy, float)
+
+    def test_target_overrides_min_max(self, sample_constructs):
+        config = OptimizationConfig(
+            iterations=100,
+            target_library_size=5,
+            target_motif_usage=3,
+            min_motif_usage=1,
+            max_motif_usage=5,
+        )
+        optimizer = LibraryOptimizer(sample_constructs, config, seed=42)
+        optimizer._precompute_distances()
+        indices = set(range(5))
+        # target_motif_usage should be used instead of min/max
+        penalty = optimizer._compute_motif_usage_penalty(indices)
+        assert penalty >= 0
+
+    def test_count_motif_usage(self, sample_constructs):
+        config = OptimizationConfig(iterations=100, target_library_size=5)
+        optimizer = LibraryOptimizer(sample_constructs, config, seed=42)
+        counts = optimizer._count_motif_usage(set(range(3)))
+        assert isinstance(counts, dict)
+        assert all(isinstance(v, int) for v in counts.values())

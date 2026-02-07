@@ -181,3 +181,59 @@ class TestGetLibrarySummary:
         summary = get_library_summary(test_constructs)
         assert "avg_edit_distance" in summary
         assert summary["avg_edit_distance"] >= 0
+
+
+class TestGetLibrarySummaryEnhanced:
+    """Tests for enhanced get_library_summary."""
+
+    def test_per_motif_usage(self, test_constructs):
+        summary = get_library_summary(test_constructs)
+        assert "per_motif_usage" in summary
+        assert isinstance(summary["per_motif_usage"], dict)
+        assert "GAC&GC" in summary["per_motif_usage"]
+
+
+class TestSaveDetailedSummary:
+    """Tests for save_detailed_summary function."""
+
+    def test_creates_file(self, test_constructs, temp_dir):
+        from twoway_lib.io import save_detailed_summary
+
+        path = temp_dir / "detailed.json"
+        save_detailed_summary(test_constructs, path)
+        assert path.exists()
+
+    def test_valid_json(self, test_constructs, temp_dir):
+        from twoway_lib.io import save_detailed_summary
+
+        path = temp_dir / "detailed.json"
+        save_detailed_summary(test_constructs, path)
+        with open(path) as f:
+            data = json.load(f)
+        assert "summary" in data
+        assert "constructs" in data
+
+    def test_with_ensemble_defects(self, test_constructs, temp_dir):
+        from twoway_lib.io import save_detailed_summary
+
+        path = temp_dir / "detailed.json"
+        eds = [1.0, 2.0, 3.0]
+        save_detailed_summary(test_constructs, path, ensemble_defects=eds)
+        with open(path) as f:
+            data = json.load(f)
+        assert "ensemble_defect_stats" in data
+        assert data["ensemble_defect_stats"]["min"] == 1.0
+
+    def test_with_motif_results(self, test_constructs, temp_dir):
+        from twoway_lib.io import save_detailed_summary
+
+        path = temp_dir / "detailed.json"
+        motif_results = [{"motif": "GAC&GC", "passes": True}]
+        save_detailed_summary(
+            test_constructs,
+            path,
+            motif_test_results=motif_results,
+        )
+        with open(path) as f:
+            data = json.load(f)
+        assert "motif_test_results" in data

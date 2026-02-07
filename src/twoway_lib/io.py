@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import Any
 
 from twoway_lib.construct import Construct
 from twoway_lib.diversity import calculate_diversity_score
@@ -55,7 +56,7 @@ def format_construct_dict(construct: Construct, index: int) -> dict:
     """
     motifs_data = []
     for i, motif in enumerate(construct.motifs):
-        motif_dict = {
+        motif_dict: dict[str, Any] = {
             "sequence": motif.sequence,
             "structure": motif.structure,
         }
@@ -153,4 +154,73 @@ def get_library_summary(constructs: list[Construct]) -> dict:
         "motif_usage_max": max(used_counts) if used_counts else 0,
         "motif_usage_mean": sum(used_counts) / len(used_counts) if used_counts else 0,
         "avg_edit_distance": avg_edit_distance,
+        "per_motif_usage": dict(motif_counts),
     }
+
+
+def save_detailed_summary(
+    constructs: list[Construct],
+    path: Path | str,
+    ensemble_defects: list[float] | None = None,
+    motif_test_results: list[dict] | None = None,
+) -> None:
+    """
+    Save a comprehensive JSON summary of the library.
+
+    Includes per-construct motif positions, per-motif usage, diversity
+    metrics, and optionally ensemble defect distribution.
+
+    Args:
+        constructs: List of constructs.
+        path: Output file path.
+        ensemble_defects: Optional list of ensemble defects per construct.
+        motif_test_results: Optional list of motif test result dicts.
+    """
+    path = Path(path)
+
+    # Per-construct data
+    construct_data = []
+    for i, c in enumerate(constructs):
+        entry: dict = {
+            "index": i,
+            "sequence": c.sequence,
+            "structure": c.structure,
+            "length": c.length(),
+            "motifs": [m.sequence for m in c.motifs],
+        }
+        if c.motif_positions:
+            entry["motif_positions"] = [
+                {
+                    "motif": mp.motif.sequence,
+                    "strand1": mp.strand1_positions,
+                    "strand2": mp.strand2_positions,
+                }
+                for mp in c.motif_positions
+            ]
+        if ensemble_defects and i < len(ensemble_defects):
+            entry["ensemble_defect"] = ensemble_defects[i]
+        construct_data.append(entry)
+
+    # Summary stats
+    summary = get_library_summary(constructs)
+
+    # Ensemble defect stats
+    ed_stats = None
+    if ensemble_defects:
+        ed_stats = {
+            "min": min(ensemble_defects),
+            "max": max(ensemble_defects),
+            "mean": sum(ensemble_defects) / len(ensemble_defects),
+        }
+
+    output = {
+        "summary": summary,
+        "constructs": construct_data,
+    }
+    if ed_stats:
+        output["ensemble_defect_stats"] = ed_stats
+    if motif_test_results:
+        output["motif_test_results"] = motif_test_results
+
+    with open(path, "w") as f:
+        json.dump(output, f, indent=2)

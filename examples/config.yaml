@@ -28,6 +28,19 @@ hairpin_structure: "(....)"
 helix_length: 3
 allow_wobble_pairs: true  # Allow G-U/U-G wobble pairs in helices
 
+# Variable helix lengths (optional, defaults to helix_length if not set)
+# helix_length_min: 2
+# helix_length_max: 4
+
+# Require GU wobble pair in helices of this length or longer (optional)
+# gu_required_above_length: 4
+
+# Spacer sequences between primers and first/last helix (optional)
+# spacer_5p_sequence: "AA"
+# spacer_5p_structure: ".."
+# spacer_3p_sequence: "AA"
+# spacer_3p_structure: ".."
+
 # Validation settings
 validation:
   enabled: true
@@ -47,3 +60,4 @@ optimization:
   cooling_rate: 0.00001
   target_library_size: 3000
   max_attempts: 100
+  # target_motif_usage: 50  # Desired usage count per motif (optional)

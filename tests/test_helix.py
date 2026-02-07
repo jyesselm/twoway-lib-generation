@@ -6,8 +6,8 @@ import pytest
 
 from twoway_lib.helix import (
     ALL_PAIRS,
-    Helix,
     WOBBLE_PAIRS,
+    Helix,
     generate_all_helices,
     helix_from_strand1,
     random_helix,
@@ -173,7 +173,7 @@ class TestWobblePairs:
         for _ in range(50):
             helix = random_helix(3, rng, allow_wobble=False)
             # Each position should have WC pairs only
-            for s1, s2 in zip(helix.strand1, reversed(helix.strand2)):
+            for s1, s2 in zip(helix.strand1, reversed(helix.strand2), strict=True):
                 pair = (s1, s2)
                 assert pair not in WOBBLE_PAIRS
 
@@ -183,3 +183,69 @@ class TestWobblePairs:
         for h in helices:
             assert h.structure1 == "(("
             assert h.structure2 == "))"
+
+
+class TestHasWobblePair:
+    """Tests for has_wobble_pair function."""
+
+    def test_wc_helix_no_wobble(self):
+        from twoway_lib.helix import has_wobble_pair, helix_from_strand1
+
+        helix = helix_from_strand1("AGC")
+        assert has_wobble_pair(helix) is False
+
+    def test_wobble_helix_detected(self):
+        from twoway_lib.helix import has_wobble_pair
+
+        # G-U pair: strand1='G', strand2 reversed -> need strand2 reversed has 'U'
+        helix = Helix.from_sequences("G", "U", "(", ")")
+        assert has_wobble_pair(helix) is True
+
+    def test_mixed_helix(self):
+        from twoway_lib.helix import has_wobble_pair
+
+        # AGG strand1, strand2 reversed = 'U' at pos 2 paired with 'G' at pos 0
+        helix = Helix.from_sequences("AGG", "CCU", "(((", ")))")
+        # pos 0: A paired with reversed strand2[2]=U -> (A,U) WC
+        # pos 1: G paired with reversed strand2[1]=C -> (G,C) WC
+        # pos 2: G paired with reversed strand2[0]=C -> (G,C) WC
+        assert has_wobble_pair(helix) is False
+
+
+class TestRandomHelixWithGuRequirement:
+    """Tests for random_helix_with_gu_requirement function."""
+
+    def test_has_gu_pair(self):
+        from twoway_lib.helix import has_wobble_pair, random_helix_with_gu_requirement
+
+        rng = Random(42)
+        for _ in range(20):
+            helix = random_helix_with_gu_requirement(3, rng, require_gu=True)
+            assert has_wobble_pair(helix) is True
+
+    def test_correct_length(self):
+        from twoway_lib.helix import random_helix_with_gu_requirement
+
+        rng = Random(42)
+        helix = random_helix_with_gu_requirement(5, rng)
+        assert helix.length() == 5
+
+    def test_no_gu_required(self):
+        from twoway_lib.helix import random_helix_with_gu_requirement
+
+        rng = Random(42)
+        helix = random_helix_with_gu_requirement(3, rng, require_gu=False)
+        assert helix.length() == 3
+
+    def test_invalid_length(self):
+        from twoway_lib.helix import random_helix_with_gu_requirement
+
+        with pytest.raises(ValueError):
+            random_helix_with_gu_requirement(0, Random(42))
+
+    def test_length_1_has_gu(self):
+        from twoway_lib.helix import has_wobble_pair, random_helix_with_gu_requirement
+
+        rng = Random(42)
+        helix = random_helix_with_gu_requirement(1, rng, require_gu=True)
+        assert has_wobble_pair(helix) is True

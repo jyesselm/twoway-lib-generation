@@ -1,5 +1,6 @@
 """Main library generation pipeline."""
 
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from random import Random
 
@@ -12,11 +13,11 @@ from twoway_lib.construct import (
     calculate_construct_length,
 )
 from twoway_lib.hairpin import hairpin_from_sequence, random_hairpin
-from twoway_lib.helix import Helix, random_helix
+from twoway_lib.helix import Helix, random_helix, random_helix_with_gu_requirement
+from twoway_lib.length_solver import compute_helix_budget, random_helix_assignment
 from twoway_lib.motif import Motif
 from twoway_lib.optimizer import LibraryOptimizer
 from twoway_lib.validation import (
-    check_sequence_constraints,
     filter_foldable_motifs,
     validate_construct,
 )
@@ -104,14 +105,18 @@ class LibraryGenerator:
         num_candidates: int,
         max_attempts: int | None = None,
         auto_tune: bool = False,
+        parallel: bool = False,
+        n_workers: int = 4,
     ) -> list[Construct]:
         """
         Generate a library of diverse constructs.
 
         Args:
             num_candidates: Number of candidates to generate before selection.
-            max_attempts: Maximum attempts to generate candidates (default: num_candidates * 100).
-            auto_tune: If True, auto-tune annealing parameters before optimization.
+            max_attempts: Maximum attempts to generate candidates.
+            auto_tune: If True, auto-tune annealing parameters.
+            parallel: If True, use parallel generation.
+            n_workers: Number of workers for parallel generation.
 
         Returns:
             List of selected diverse constructs.
@@ -120,7 +125,16 @@ class LibraryGenerator:
         self._motif_usage = {m.sequence: 0 for m in self.motifs}
 
         logger.info("Generating candidate constructs", count=num_candidates)
-        candidates = self._generate_candidates(num_candidates, max_attempts)
+
+        if parallel:
+            candidates = self._generate_candidates_parallel(
+                num_candidates,
+                max_attempts,
+                n_workers,
+            )
+        else:
+            candidates = self._generate_candidates(num_candidates, max_attempts)
+
         logger.info("Generated valid candidates", count=len(candidates))
 
         if len(candidates) <= self.config.optimization.target_library_size:
@@ -154,7 +168,7 @@ class LibraryGenerator:
         self, count: int, max_attempts: int | None = None
     ) -> list[Construct]:
         """Generate valid candidate constructs."""
-        candidates = []
+        candidates: list[Construct] = []
         attempts = 0
         if max_attempts is None:
             max_attempts = count * 100
@@ -189,6 +203,58 @@ class LibraryGenerator:
 
         return candidates
 
+    def _generate_candidates_parallel(
+        self,
+        count: int,
+        max_attempts: int | None = None,
+        n_workers: int = 4,
+    ) -> list[Construct]:
+        """
+        Generate candidates using multiple processes.
+
+        Args:
+            count: Total number of candidates to generate.
+            max_attempts: Maximum attempts per batch.
+            n_workers: Number of parallel workers.
+
+        Returns:
+            List of valid candidate constructs.
+        """
+        batch_size = count // n_workers
+        if max_attempts is None:
+            batch_max = batch_size * 100
+        else:
+            batch_max = max_attempts // n_workers
+
+        # Generate seeds for each worker
+        seeds = [self.rng.randint(0, 2**31) for _ in range(n_workers)]
+
+        logger.info(
+            "Starting parallel generation",
+            workers=n_workers,
+            batch_size=batch_size,
+        )
+
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            futures = [
+                executor.submit(
+                    _generate_candidate_batch,
+                    self.config,
+                    self.motifs,
+                    batch_size,
+                    batch_max,
+                    seed,
+                )
+                for seed in seeds
+            ]
+            all_candidates: list[Construct] = []
+            for future in futures:
+                all_candidates.extend(future.result())
+
+        self.stats.candidates_generated = count
+        self.stats.candidates_valid = len(all_candidates)
+        return all_candidates
+
     def _try_generate_construct(self) -> Construct | None:
         """Attempt to generate a single valid construct."""
         num_motifs = self.rng.randint(*self.config.motifs_per_construct)
@@ -200,7 +266,7 @@ class LibraryGenerator:
             motifs=[m.sequence for m in selected_motifs],
         )
 
-        construct = self._assemble_with_length_constraint(selected_motifs)
+        construct = self._assemble_with_length_solver(selected_motifs)
         if construct is None:
             logger.debug("Rejected: length out of range")
             self.stats.candidates_rejected_length += 1
@@ -245,7 +311,9 @@ class LibraryGenerator:
             if self.config.allow_motif_flip and self.rng.random() < 0.5:
                 motif = motif.flip()
             selected.append(motif)
-            self._motif_usage[motif.sequence] = self._motif_usage.get(motif.sequence, 0) + 1
+            self._motif_usage[motif.sequence] = (
+                self._motif_usage.get(motif.sequence, 0) + 1
+            )
         return selected
 
     def _select_weighted_motif(self) -> Motif:
@@ -254,33 +322,73 @@ class LibraryGenerator:
             return self.rng.choice(self.motifs)
 
         max_usage = max(self._motif_usage.values()) + 1
-        weights = [max_usage - self._motif_usage.get(m.sequence, 0) for m in self.motifs]
+        weights = [
+            max_usage - self._motif_usage.get(m.sequence, 0) for m in self.motifs
+        ]
         total = sum(weights)
         if total == 0:
             return self.rng.choice(self.motifs)
 
         r = self.rng.random() * total
         cumulative = 0
-        for motif, weight in zip(self.motifs, weights):
+        for motif, weight in zip(self.motifs, weights, strict=True):
             cumulative += weight
             if r <= cumulative:
                 return motif
         return self.motifs[-1]
 
-    def _assemble_with_length_constraint(
+    def _assemble_with_length_solver(
         self,
         motifs: list[Motif],
     ) -> Construct | None:
-        """Assemble construct and check length constraint."""
-        helices = self._generate_helices(len(motifs) + 1)
+        """
+        Assemble construct using length solver for exact helix lengths.
+
+        Picks a random target length, computes helix budget, assigns
+        lengths to individual helices, then assembles.
+        """
+        target = self.rng.randint(
+            self.config.target_length_min,
+            self.config.target_length_max,
+        )
+        motif_lengths = [m.total_length() for m in motifs]
+        num_helices = len(motifs) + 1
+        min_h, max_h = self.config.effective_helix_length_range
+
+        assert self.config.hairpin_loop_length is not None
+        budget = compute_helix_budget(
+            target_length=target,
+            motif_lengths=motif_lengths,
+            p5_len=self.config.p5_length,
+            p3_len=self.config.p3_length,
+            hairpin_len=self.config.hairpin_loop_length,
+            spacer_5p_len=self.config.spacer_5p_length,
+            spacer_3p_len=self.config.spacer_3p_length,
+        )
+        if budget is None:
+            return None
+
+        assignment = random_helix_assignment(
+            budget,
+            num_helices,
+            min_h,
+            max_h,
+            self.rng,
+        )
+        if assignment is None:
+            return None
+
+        helices = self._generate_variable_helices(assignment)
+
         if self.config.hairpin_sequence:
             hairpin = hairpin_from_sequence(
-                self.config.hairpin_sequence, self.config.hairpin_structure
+                self.config.hairpin_sequence,
+                self.config.hairpin_structure,
             )
         else:
             hairpin = random_hairpin(self.config.hairpin_loop_length, self.rng)
 
-        construct = assemble_construct(
+        return assemble_construct(
             motifs=motifs,
             helices=helices,
             hairpin=hairpin,
@@ -288,27 +396,47 @@ class LibraryGenerator:
             p5_ss=self.config.p5_structure,
             p3_seq=self.config.p3_sequence,
             p3_ss=self.config.p3_structure,
+            spacer_5p_seq=self.config.spacer_5p_sequence,
+            spacer_5p_ss=self.config.spacer_5p_structure,
+            spacer_3p_seq=self.config.spacer_3p_sequence,
+            spacer_3p_ss=self.config.spacer_3p_structure,
         )
 
-        if not self._check_length(construct):
-            return None
-        return construct
+    def _generate_variable_helices(
+        self,
+        assignment: tuple[int, ...],
+    ) -> list[Helix]:
+        """
+        Generate helices with variable lengths, enforcing GU requirements.
 
-    def _generate_helices(self, count: int) -> list[Helix]:
-        """Generate helices for a construct."""
-        return [
-            random_helix(
-                self.config.helix_length, self.rng, self.config.allow_wobble_pairs
-            )
-            for _ in range(count)
-        ]
+        Args:
+            assignment: Tuple of helix lengths (one per helix).
 
-    def _check_length(self, construct: Construct) -> bool:
-        """Check if construct length is within target range."""
-        length = construct.length()
-        return self.config.target_length_min <= length <= self.config.target_length_max
+        Returns:
+            List of Helix objects with assigned lengths.
+        """
+        helices = []
+        gu_threshold = self.config.gu_required_above_length
+        for length in assignment:
+            if gu_threshold is not None and length >= gu_threshold:
+                helix = random_helix_with_gu_requirement(
+                    length,
+                    self.rng,
+                    require_gu=True,
+                )
+            else:
+                helix = random_helix(
+                    length,
+                    self.rng,
+                    self.config.allow_wobble_pairs,
+                )
+            helices.append(helix)
+        return helices
 
-    def _check_sequence_constraints(self, construct: Construct) -> tuple[bool, str]:
+    def _check_sequence_constraints(
+        self,
+        construct: Construct,
+    ) -> tuple[bool, str]:
         """Check sequence constraints (consecutive nucleotides, GC pairs).
 
         Only checks the core region, excluding p5 and p3 sequences which are fixed.
@@ -318,7 +446,10 @@ class LibraryGenerator:
         # Skip if validation is disabled or neither constraint is enabled
         if not val_config.enabled:
             return True, ""
-        if not val_config.avoid_consecutive_nucleotides and not val_config.avoid_consecutive_gc_pairs:
+        if (
+            not val_config.avoid_consecutive_nucleotides
+            and not val_config.avoid_consecutive_gc_pairs
+        ):
             return True, ""
 
         # Extract core sequence/structure (exclude p5 and p3)
@@ -335,7 +466,8 @@ class LibraryGenerator:
             from twoway_lib.validation import find_consecutive_nucleotides
 
             violations = find_consecutive_nucleotides(
-                core_seq, val_config.max_consecutive_nucleotides
+                core_seq,
+                val_config.max_consecutive_nucleotides,
             )
             # Filter out violations that exist in motifs
             for pos, nt in violations:
@@ -347,8 +479,15 @@ class LibraryGenerator:
         if val_config.avoid_consecutive_gc_pairs:
             from twoway_lib.validation import has_consecutive_gc_pairs
 
-            if has_consecutive_gc_pairs(core_seq, core_ss, val_config.max_consecutive_gc_pairs):
-                return False, f"{val_config.max_consecutive_gc_pairs}+ consecutive GC pairs"
+            if has_consecutive_gc_pairs(
+                core_seq,
+                core_ss,
+                val_config.max_consecutive_gc_pairs,
+            ):
+                return (
+                    False,
+                    f"{val_config.max_consecutive_gc_pairs}+ consecutive GC pairs",
+                )
 
         return True, ""
 
@@ -378,6 +517,30 @@ class LibraryGenerator:
         )
         selected_indices = optimizer.optimize(auto_tune=auto_tune)
         return [candidates[i] for i in selected_indices]
+
+
+def _generate_candidate_batch(
+    config: LibraryConfig,
+    motifs: list[Motif],
+    batch_size: int,
+    max_attempts: int,
+    seed: int,
+) -> list[Construct]:
+    """
+    Generate a batch of candidates (module-level for pickling).
+
+    Args:
+        config: Library configuration.
+        motifs: Available motifs.
+        batch_size: Number of candidates to generate.
+        max_attempts: Maximum attempts.
+        seed: Random seed for this batch.
+
+    Returns:
+        List of valid candidate constructs.
+    """
+    generator = LibraryGenerator(config, motifs, seed=seed, filter_motifs=False)
+    return generator._generate_candidates(batch_size, max_attempts)
 
 
 def generate_library(
@@ -423,16 +586,33 @@ def estimate_feasible_lengths(
     max_motif = max(motif_lengths)
 
     min_n, max_n = config.motifs_per_construct
-    helix_len = config.helix_length
+    min_h, max_h = config.effective_helix_length_range
+    assert config.hairpin_loop_length is not None
     hairpin_len = config.hairpin_loop_length
     p5_len = config.p5_length
     p3_len = config.p3_length
+    spacer_5p = config.spacer_5p_length
+    spacer_3p = config.spacer_3p_length
 
     min_total = calculate_construct_length(
-        min_n, [min_motif] * min_n, helix_len, hairpin_len, p5_len, p3_len
+        min_n,
+        [min_motif] * min_n,
+        min_h,
+        hairpin_len,
+        p5_len,
+        p3_len,
+        spacer_5p,
+        spacer_3p,
     )
     max_total = calculate_construct_length(
-        max_n, [max_motif] * max_n, helix_len, hairpin_len, p5_len, p3_len
+        max_n,
+        [max_motif] * max_n,
+        max_h,
+        hairpin_len,
+        p5_len,
+        p3_len,
+        spacer_5p,
+        spacer_3p,
     )
 
     return min_total, max_total

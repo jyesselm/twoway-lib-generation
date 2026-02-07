@@ -7,12 +7,16 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from twoway_lib.cli import cli
-from twoway_lib.config import LibraryConfig, OptimizationConfig, ValidationConfig, load_config
+from twoway_lib.config import (
+    LibraryConfig,
+    OptimizationConfig,
+    ValidationConfig,
+    load_config,
+)
 from twoway_lib.generator import LibraryGenerator, generate_library
 from twoway_lib.io import load_library_json, save_library_json
 from twoway_lib.motif import Motif, load_motifs
-from twoway_lib.validation import fold_sequence, compare_structures
-
+from twoway_lib.validation import compare_structures, fold_sequence
 
 # Path to example files
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
@@ -115,7 +119,7 @@ class TestFullPipelineWithExamples:
         )
 
         generator = LibraryGenerator(config, motifs, seed=42)
-        constructs = generator.generate(num_candidates=100)
+        generator.generate(num_candidates=100)
 
         # May get few or no constructs due to validation
         # Just verify the pipeline completes without error
@@ -218,6 +222,7 @@ class TestCLIIntegration:
     @pytest.fixture
     def runner(self):
         from click.testing import CliRunner
+
         return CliRunner()
 
     def test_cli_generate_command(self, runner):
@@ -262,9 +267,12 @@ UUG&CAA,(.(&.))
                     "generate",
                     str(config_path),
                     str(motifs_path),
-                    "-o", str(output),
-                    "-n", "50",
-                    "-s", "42",
+                    "-o",
+                    str(output),
+                    "-n",
+                    "50",
+                    "-s",
+                    "42",
                 ],
             )
 

@@ -238,14 +238,14 @@ class TestPrimerLookup:
 
     def test_p5_sequences_have_sequence_structure(self):
         sequences = get_p5_sequences()
-        for name, (seq, struct) in sequences.items():
+        for _name, (seq, struct) in sequences.items():
             assert isinstance(seq, str)
             assert isinstance(struct, str)
             assert len(seq) == len(struct)
 
     def test_p3_sequences_have_sequence_structure(self):
         sequences = get_p3_sequences()
-        for name, (seq, struct) in sequences.items():
+        for _name, (seq, struct) in sequences.items():
             assert isinstance(seq, str)
             assert isinstance(struct, str)
             assert len(seq) == len(struct)
@@ -327,3 +327,194 @@ hairpin_loop_length: 4
 
         with pytest.raises(ValueError, match="Unknown p5 sequence"):
             load_config(config_file)
+
+
+class TestVariableHelixConfig:
+    """Tests for variable helix length configuration."""
+
+    def test_defaults_from_helix_length(self, sample_config):
+        assert sample_config.helix_length_min == 3
+        assert sample_config.helix_length_max == 3
+
+    def test_effective_helix_length_range(self, sample_config):
+        assert sample_config.effective_helix_length_range == (3, 3)
+
+    def test_custom_range(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            helix_length_min=2,
+            helix_length_max=5,
+        )
+        assert config.effective_helix_length_range == (2, 5)
+
+    def test_invalid_range(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            helix_length_min=5,
+            helix_length_max=2,
+        )
+        with pytest.raises(
+            ValueError, match="helix_length_min must be <= helix_length_max"
+        ):
+            validate_config(config)
+
+    def test_gu_required_above_length(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            gu_required_above_length=4,
+        )
+        validate_config(config)
+        assert config.gu_required_above_length == 4
+
+    def test_gu_required_invalid(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            gu_required_above_length=0,
+        )
+        with pytest.raises(ValueError, match="gu_required_above_length must be >= 1"):
+            validate_config(config)
+
+
+class TestSpacerConfig:
+    """Tests for spacer configuration."""
+
+    def test_spacer_lengths(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            spacer_5p_sequence="AA",
+            spacer_5p_structure="..",
+            spacer_3p_sequence="UUU",
+            spacer_3p_structure="...",
+        )
+        assert config.spacer_5p_length == 2
+        assert config.spacer_3p_length == 3
+
+    def test_no_spacer_default(self, sample_config):
+        assert sample_config.spacer_5p_length == 0
+        assert sample_config.spacer_3p_length == 0
+
+    def test_spacer_validation_invalid_nucleotides(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            spacer_5p_sequence="AXA",
+            spacer_5p_structure="...",
+        )
+        with pytest.raises(ValueError, match="invalid nucleotides"):
+            validate_config(config)
+
+    def test_spacer_validation_length_mismatch(self):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            spacer_5p_sequence="AA",
+            spacer_5p_structure="...",
+        )
+        with pytest.raises(ValueError, match="same length"):
+            validate_config(config)
+
+    def test_round_trip_with_spacers(self, temp_dir):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            spacer_5p_sequence="AA",
+            spacer_5p_structure="..",
+            spacer_3p_sequence="UU",
+            spacer_3p_structure="..",
+        )
+        path = temp_dir / "config.yaml"
+        save_config(config, path)
+        loaded = load_config(path)
+        assert loaded.spacer_5p_sequence == "AA"
+        assert loaded.spacer_3p_sequence == "UU"
+
+
+class TestTargetMotifUsageConfig:
+    """Tests for target_motif_usage configuration."""
+
+    def test_default_none(self):
+        config = OptimizationConfig()
+        assert config.target_motif_usage is None
+
+    def test_set_value(self):
+        config = OptimizationConfig(target_motif_usage=50)
+        assert config.target_motif_usage == 50
+
+    def test_round_trip(self, temp_dir):
+        config = LibraryConfig(
+            target_length_min=100,
+            target_length_max=120,
+            motifs_per_construct_min=3,
+            motifs_per_construct_max=4,
+            p5_sequence="GGAAC",
+            p5_structure="(((..",
+            p3_sequence="GUUCC",
+            p3_structure="..)))",
+            helix_length=3,
+            optimization=OptimizationConfig(target_motif_usage=50),
+        )
+        path = temp_dir / "config.yaml"
+        save_config(config, path)
+        loaded = load_config(path)
+        assert loaded.optimization.target_motif_usage == 50

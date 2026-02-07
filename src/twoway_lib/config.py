@@ -35,6 +35,7 @@ class OptimizationConfig:
     min_motif_usage: int | None = None
     max_motif_usage: int | None = None
     motif_usage_weight: float = 1.0  # Weight of motif balance vs diversity
+    target_motif_usage: int | None = None  # Desired usage count per motif
 
 
 @dataclass
@@ -50,11 +51,18 @@ class LibraryConfig:
     p3_sequence: str
     p3_structure: str
     helix_length: int = 3
+    helix_length_min: int | None = None  # Variable helix length range minimum
+    helix_length_max: int | None = None  # Variable helix length range maximum
+    gu_required_above_length: int | None = None  # Helices >= this length require GU
     hairpin_loop_length: int | None = None  # Derived from hairpin_sequence if provided
     hairpin_sequence: str | None = None
     hairpin_structure: str | None = None
     allow_motif_flip: bool = False
     allow_wobble_pairs: bool = False  # Allow G-U/U-G pairs in helices
+    spacer_5p_sequence: str | None = None  # Linker between p5 and first helix
+    spacer_5p_structure: str | None = None
+    spacer_3p_sequence: str | None = None  # Linker between last helix and p3
+    spacer_3p_structure: str | None = None
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
 
@@ -67,6 +75,12 @@ class LibraryConfig:
         elif self.hairpin_loop_length is None:
             # Default to 4 if neither specified
             self.hairpin_loop_length = 4
+
+        # Derive helix_length_min/max from helix_length if not set
+        if self.helix_length_min is None:
+            self.helix_length_min = self.helix_length
+        if self.helix_length_max is None:
+            self.helix_length_max = self.helix_length
 
     @property
     def target_length(self) -> tuple[int, int]:
@@ -87,6 +101,24 @@ class LibraryConfig:
     def p3_length(self) -> int:
         """Length of 3' common sequence."""
         return len(self.p3_sequence)
+
+    @property
+    def spacer_5p_length(self) -> int:
+        """Length of 5' spacer sequence (0 if not set)."""
+        return len(self.spacer_5p_sequence) if self.spacer_5p_sequence else 0
+
+    @property
+    def spacer_3p_length(self) -> int:
+        """Length of 3' spacer sequence (0 if not set)."""
+        return len(self.spacer_3p_sequence) if self.spacer_3p_sequence else 0
+
+    @property
+    def effective_helix_length_range(self) -> tuple[int, int]:
+        """Return the effective helix length range (min, max)."""
+        # Always set after __post_init__
+        assert self.helix_length_min is not None
+        assert self.helix_length_max is not None
+        return (self.helix_length_min, self.helix_length_max)
 
     @cached_property
     def p5_secstruct(self) -> SecStruct:
@@ -155,11 +187,18 @@ def _parse_config_dict(data: dict[str, Any]) -> LibraryConfig:
         p3_sequence=p3_seq,
         p3_structure=p3_struct,
         helix_length=data.get("helix_length", 3),
+        helix_length_min=data.get("helix_length_min"),
+        helix_length_max=data.get("helix_length_max"),
+        gu_required_above_length=data.get("gu_required_above_length"),
         hairpin_loop_length=data.get("hairpin_loop_length", 4),
         hairpin_sequence=data.get("hairpin_sequence"),
         hairpin_structure=data.get("hairpin_structure"),
         allow_motif_flip=data.get("allow_motif_flip", False),
         allow_wobble_pairs=data.get("allow_wobble_pairs", False),
+        spacer_5p_sequence=data.get("spacer_5p_sequence"),
+        spacer_5p_structure=data.get("spacer_5p_structure"),
+        spacer_3p_sequence=data.get("spacer_3p_sequence"),
+        spacer_3p_structure=data.get("spacer_3p_structure"),
         validation=validation,
         optimization=optimization,
     )
@@ -207,6 +246,7 @@ def _parse_optimization_config(data: dict[str, Any]) -> OptimizationConfig:
         min_motif_usage=data.get("min_motif_usage"),
         max_motif_usage=data.get("max_motif_usage"),
         motif_usage_weight=data.get("motif_usage_weight", 1.0),
+        target_motif_usage=data.get("target_motif_usage"),
     )
 
 
@@ -223,6 +263,7 @@ def validate_config(config: LibraryConfig) -> None:
     _validate_lengths(config)
     _validate_sequences(config)
     _validate_hairpin_sequence(config)
+    _validate_spacer_sequences(config)
     _validate_validation_config(config.validation)
     _validate_optimization_config(config.optimization)
 
@@ -239,8 +280,28 @@ def _validate_lengths(config: LibraryConfig) -> None:
         raise ValueError("motifs_per_construct min must be >= 1")
     if config.helix_length < 1:
         raise ValueError("helix_length must be >= 1")
-    if config.hairpin_loop_length < 3:
+    _validate_helix_range(config)
+    if config.hairpin_loop_length is not None and config.hairpin_loop_length < 3:
         raise ValueError("hairpin_loop_length must be >= 3")
+
+
+def _validate_helix_range(config: LibraryConfig) -> None:
+    """Validate variable helix length and GU threshold settings."""
+    if config.helix_length_min is not None and config.helix_length_min < 1:
+        raise ValueError("helix_length_min must be >= 1")
+    if config.helix_length_max is not None and config.helix_length_max < 1:
+        raise ValueError("helix_length_max must be >= 1")
+    if (
+        config.helix_length_min is not None
+        and config.helix_length_max is not None
+        and config.helix_length_min > config.helix_length_max
+    ):
+        raise ValueError("helix_length_min must be <= helix_length_max")
+    if (
+        config.gu_required_above_length is not None
+        and config.gu_required_above_length < 1
+    ):
+        raise ValueError("gu_required_above_length must be >= 1")
 
 
 def _validate_sequences(config: LibraryConfig) -> None:
@@ -307,17 +368,53 @@ def _validate_hairpin_sequence(config: LibraryConfig) -> None:
     if config.hairpin_sequence is not None:
         invalid = set(config.hairpin_sequence.upper()) - valid_nts
         if invalid:
-            raise ValueError(f"hairpin_sequence contains invalid nucleotides: {invalid}")
+            raise ValueError(
+                f"hairpin_sequence contains invalid nucleotides: {invalid}"
+            )
 
     if config.hairpin_structure is not None:
         invalid = set(config.hairpin_structure) - valid_ss
         if invalid:
-            raise ValueError(f"hairpin_structure contains invalid characters: {invalid}")
+            raise ValueError(
+                f"hairpin_structure contains invalid characters: {invalid}"
+            )
 
     # If both provided, they must have same length
-    if config.hairpin_sequence and config.hairpin_structure:
-        if len(config.hairpin_sequence) != len(config.hairpin_structure):
-            raise ValueError("hairpin_sequence and hairpin_structure must have same length")
+    if (
+        config.hairpin_sequence
+        and config.hairpin_structure
+        and len(config.hairpin_sequence) != len(config.hairpin_structure)
+    ):
+        raise ValueError("hairpin_sequence and hairpin_structure must have same length")
+
+
+def _validate_spacer_sequences(config: LibraryConfig) -> None:
+    """Validate spacer sequences and structures if provided."""
+    valid_nts = set("AUGC")
+    valid_ss = set("().")
+
+    for name, seq, ss in [
+        ("spacer_5p", config.spacer_5p_sequence, config.spacer_5p_structure),
+        ("spacer_3p", config.spacer_3p_sequence, config.spacer_3p_structure),
+    ]:
+        if seq is None and ss is None:
+            continue
+        if seq is not None:
+            invalid = set(seq.upper()) - valid_nts
+            if invalid:
+                raise ValueError(
+                    f"{name}_sequence contains invalid nucleotides: {invalid}"
+                )
+        if ss is not None:
+            invalid = set(ss) - valid_ss
+            if invalid:
+                raise ValueError(
+                    f"{name}_structure contains invalid characters: {invalid}"
+                )
+        if seq is not None and ss is not None and len(seq) != len(ss):
+            raise ValueError(
+                f"{name}_sequence and {name}_structure must have same length"
+            )
 
 
 def generate_default_config() -> LibraryConfig:
@@ -362,7 +459,10 @@ def save_config(config: LibraryConfig, path: Path | str) -> None:
 def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
     """Convert LibraryConfig to dictionary for YAML serialization."""
     data: dict[str, Any] = {
-        "target_length": {"min": config.target_length_min, "max": config.target_length_max},
+        "target_length": {
+            "min": config.target_length_min,
+            "max": config.target_length_max,
+        },
         "motifs_per_construct": {
             "min": config.motifs_per_construct_min,
             "max": config.motifs_per_construct_max,
@@ -374,6 +474,26 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
         "helix_length": config.helix_length,
         "hairpin_loop_length": config.hairpin_loop_length,
     }
+    _add_optional_fields(data, config)
+    data["validation"] = _validation_config_to_dict(config.validation)
+    data["optimization"] = _optimization_config_to_dict(config.optimization)
+    return data
+
+
+def _add_optional_fields(data: dict[str, Any], config: LibraryConfig) -> None:
+    """Add optional config fields to the serialization dict."""
+    if (
+        config.helix_length_min is not None
+        and config.helix_length_min != config.helix_length
+    ):
+        data["helix_length_min"] = config.helix_length_min
+    if (
+        config.helix_length_max is not None
+        and config.helix_length_max != config.helix_length
+    ):
+        data["helix_length_max"] = config.helix_length_max
+    if config.gu_required_above_length is not None:
+        data["gu_required_above_length"] = config.gu_required_above_length
     if config.hairpin_sequence is not None:
         data["hairpin_sequence"] = config.hairpin_sequence
     if config.hairpin_structure is not None:
@@ -382,30 +502,48 @@ def _config_to_dict(config: LibraryConfig) -> dict[str, Any]:
         data["allow_motif_flip"] = config.allow_motif_flip
     if config.allow_wobble_pairs:
         data["allow_wobble_pairs"] = config.allow_wobble_pairs
-    data["validation"] = {
-        "enabled": config.validation.enabled,
-        "max_ensemble_defect": config.validation.max_ensemble_defect,
-        "allow_structure_differences": config.validation.allow_structure_differences,
-        "min_structure_match": config.validation.min_structure_match,
-        "avoid_consecutive_nucleotides": config.validation.avoid_consecutive_nucleotides,
-        "max_consecutive_nucleotides": config.validation.max_consecutive_nucleotides,
-        "avoid_consecutive_gc_pairs": config.validation.avoid_consecutive_gc_pairs,
-        "max_consecutive_gc_pairs": config.validation.max_consecutive_gc_pairs,
+    for attr in (
+        "spacer_5p_sequence",
+        "spacer_5p_structure",
+        "spacer_3p_sequence",
+        "spacer_3p_structure",
+    ):
+        val = getattr(config, attr)
+        if val is not None:
+            data[attr] = val
+
+
+def _validation_config_to_dict(config: ValidationConfig) -> dict[str, Any]:
+    """Convert ValidationConfig to dictionary."""
+    return {
+        "enabled": config.enabled,
+        "max_ensemble_defect": config.max_ensemble_defect,
+        "allow_structure_differences": config.allow_structure_differences,
+        "min_structure_match": config.min_structure_match,
+        "avoid_consecutive_nucleotides": config.avoid_consecutive_nucleotides,
+        "max_consecutive_nucleotides": config.max_consecutive_nucleotides,
+        "avoid_consecutive_gc_pairs": config.avoid_consecutive_gc_pairs,
+        "max_consecutive_gc_pairs": config.max_consecutive_gc_pairs,
     }
+
+
+def _optimization_config_to_dict(config: OptimizationConfig) -> dict[str, Any]:
+    """Convert OptimizationConfig to dictionary."""
     opt_data: dict[str, Any] = {
-        "iterations": config.optimization.iterations,
-        "initial_temperature": config.optimization.initial_temperature,
-        "cooling_rate": config.optimization.cooling_rate,
-        "target_library_size": config.optimization.target_library_size,
+        "iterations": config.iterations,
+        "initial_temperature": config.initial_temperature,
+        "cooling_rate": config.cooling_rate,
+        "target_library_size": config.target_library_size,
     }
-    if config.optimization.min_motif_usage is not None:
-        opt_data["min_motif_usage"] = config.optimization.min_motif_usage
-    if config.optimization.max_motif_usage is not None:
-        opt_data["max_motif_usage"] = config.optimization.max_motif_usage
-    if config.optimization.motif_usage_weight != 1.0:
-        opt_data["motif_usage_weight"] = config.optimization.motif_usage_weight
-    data["optimization"] = opt_data
-    return data
+    if config.min_motif_usage is not None:
+        opt_data["min_motif_usage"] = config.min_motif_usage
+    if config.max_motif_usage is not None:
+        opt_data["max_motif_usage"] = config.max_motif_usage
+    if config.motif_usage_weight != 1.0:
+        opt_data["motif_usage_weight"] = config.motif_usage_weight
+    if config.target_motif_usage is not None:
+        opt_data["target_motif_usage"] = config.target_motif_usage
+    return opt_data
 
 
 def get_p5_sequences() -> dict[str, tuple[str, str]]:

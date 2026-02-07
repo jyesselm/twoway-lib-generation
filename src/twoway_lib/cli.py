@@ -63,6 +63,35 @@ def cli() -> None:
     is_flag=True,
     help="Auto-tune simulated annealing parameters before optimization",
 )
+@click.option(
+    "--parallel",
+    is_flag=True,
+    help="Enable parallel candidate generation",
+)
+@click.option(
+    "--workers",
+    type=int,
+    default=4,
+    help="Number of workers for parallel generation (default: 4)",
+)
+@click.option(
+    "--save-motif-results",
+    type=click.Path(),
+    default=None,
+    help="Save motif preprocessing results to JSON",
+)
+@click.option(
+    "--load-motif-results",
+    type=click.Path(exists=True),
+    default=None,
+    help="Load pre-computed motif preprocessing results",
+)
+@click.option(
+    "--detailed-summary",
+    type=click.Path(),
+    default=None,
+    help="Save detailed summary to JSON file",
+)
 def generate(
     config_path: str,
     motifs_path: str,
@@ -75,6 +104,11 @@ def generate(
     log_json: str | None,
     max_attempts: int | None,
     auto_tune: bool,
+    parallel: bool,
+    workers: int,
+    save_motif_results: str | None,
+    load_motif_results: str | None,
+    detailed_summary: str | None,
 ) -> None:
     """
     Generate a two-way junction library.
@@ -91,15 +125,67 @@ def generate(
         log.info("Loaded config", path=config_path)
         log.info("Loaded motifs", count=len(motifs), path=motifs_path)
 
+        # Handle motif preprocessing results
+        motif_results = None
+        if load_motif_results:
+            from twoway_lib.preprocessing import (
+                load_motif_results as load_results,
+            )
+
+            motif_results = load_results(load_motif_results)
+            log.info(
+                "Loaded motif results",
+                path=load_motif_results,
+                count=len(motif_results),
+            )
+
         generator = LibraryGenerator(
-            config, motifs, seed=seed, filter_motifs=not no_filter_motifs
+            config,
+            motifs,
+            seed=seed,
+            filter_motifs=not no_filter_motifs,
         )
+
+        if save_motif_results and not no_filter_motifs:
+            from twoway_lib.preprocessing import (
+                preprocess_motifs,
+            )
+            from twoway_lib.preprocessing import (
+                save_motif_results as save_results,
+            )
+
+            _, _, results = preprocess_motifs(
+                motifs,
+                helix_length=config.helix_length,
+            )
+            save_results(results, save_motif_results)
+            log.info("Saved motif results", path=save_motif_results)
+
         constructs = generator.generate(
-            num_candidates, max_attempts=max_attempts, auto_tune=auto_tune
+            num_candidates,
+            max_attempts=max_attempts,
+            auto_tune=auto_tune,
+            parallel=parallel,
+            n_workers=workers,
         )
 
         save_library_json(constructs, output)
         log.info("Saved constructs", count=len(constructs), path=output)
+
+        if detailed_summary:
+            from twoway_lib.io import save_detailed_summary
+
+            test_result_dicts = None
+            if motif_results:
+                from dataclasses import asdict
+
+                test_result_dicts = [asdict(r) for r in motif_results]
+            save_detailed_summary(
+                constructs,
+                detailed_summary,
+                motif_test_results=test_result_dicts,
+            )
+            log.info("Saved detailed summary", path=detailed_summary)
 
         _print_summary(constructs)
         log_collector.save()
@@ -180,8 +266,10 @@ def summary(library_path: str) -> None:
 @cli.command()
 @click.option("-o", "--output", default="config.yaml", help="Output config file path")
 @click.option(
-    "--validate", "validate_path", type=click.Path(exists=True),
-    help="Validate an existing config file instead of generating"
+    "--validate",
+    "validate_path",
+    type=click.Path(exists=True),
+    help="Validate an existing config file instead of generating",
 )
 def config(output: str, validate_path: str | None) -> None:
     """
@@ -235,21 +323,29 @@ def primers() -> None:
 @cli.command("test-motifs")
 @click.argument("motifs_path", type=click.Path(exists=True))
 @click.option(
-    "-r", "--repeats", default=10, help="Number of times to repeat motif in test construct"
+    "-r",
+    "--repeats",
+    default=10,
+    help="Number of times to repeat motif in test construct",
 )
-@click.option(
-    "-l", "--helix-length", default=3, help="Length of flanking helices"
-)
+@click.option("-l", "--helix-length", default=3, help="Length of flanking helices")
 @click.option(
     "-s", "--seed", type=int, default=42, help="Random seed for helix generation"
 )
 @click.option("-v", "--verbose", is_flag=True, help="Show detailed mismatch info")
+@click.option(
+    "--save-results",
+    type=click.Path(),
+    default=None,
+    help="Save motif test results to JSON file",
+)
 def test_motifs(
     motifs_path: str,
     repeats: int,
     helix_length: int,
     seed: int,
     verbose: bool,
+    save_results: str | None,
 ) -> None:
     """
     Test each motif for correct folding in a helix context.
@@ -291,6 +387,13 @@ def test_motifs(
         click.echo("Failing motifs (structure mismatch in motif region):")
         for r in failing:
             click.echo(f"  {r['motif']:20s} match: {r['motif_match']:.1%}")
+
+    if save_results:
+        import json
+
+        with open(save_results, "w") as f:
+            json.dump(results, f, indent=2)
+        click.echo(f"\nResults saved to {save_results}")
 
 
 def _test_single_motif(
@@ -341,20 +444,20 @@ def _test_single_motif(
     predicted_ss = fold_result.predicted_structure
 
     # Calculate overall match
-    total_match = sum(1 for d, p in zip(designed_ss, predicted_ss) if d == p)
+    total_match = sum(
+        1 for d, p in zip(designed_ss, predicted_ss, strict=True) if d == p
+    )
     match_pct = total_match / len(designed_ss)
 
     # Calculate match per motif instance and collect mismatch info
-    motif_positions = _find_motif_positions(
-        helices, motif, repeats, helix_length
-    )
+    motif_positions = _find_motif_positions(helices, motif, repeats, helix_length)
 
     instances_failed = 0
     motif_matches = 0
     motif_total = 0
-    mismatch_examples = []
+    mismatch_examples: list[dict[str, str]] = []
 
-    for idx, (start, end) in enumerate(motif_positions):
+    for _idx, (start, end) in enumerate(motif_positions):
         instance_match = True
         for j in range(start, end):
             motif_total += 1
@@ -366,11 +469,13 @@ def _test_single_motif(
         if not instance_match:
             instances_failed += 1
             if len(mismatch_examples) < 2:
-                mismatch_examples.append({
-                    "seq": sequence[start:end],
-                    "designed": designed_ss[start:end],
-                    "predicted": predicted_ss[start:end],
-                })
+                mismatch_examples.append(
+                    {
+                        "seq": sequence[start:end],
+                        "designed": designed_ss[start:end],
+                        "predicted": predicted_ss[start:end],
+                    }
+                )
 
     motif_match_pct = motif_matches / motif_total if motif_total > 0 else 1.0
     passes = motif_match_pct == 1.0
@@ -388,9 +493,11 @@ def _test_single_motif(
         )
 
     if verbose and not passes:
-        click.echo(f"  Example: seq={mismatch_examples[0]['seq']}  "
-                   f"designed={mismatch_examples[0]['designed']}  "
-                   f"predicted={mismatch_examples[0]['predicted']}")
+        click.echo(
+            f"  Example: seq={mismatch_examples[0]['seq']}  "
+            f"designed={mismatch_examples[0]['designed']}  "
+            f"predicted={mismatch_examples[0]['predicted']}"
+        )
         click.echo()
 
     return {
@@ -416,7 +523,7 @@ def _find_motif_positions(
 
     # 5' arm motif positions
     pos = 0
-    for i in range(repeats):
+    for _i in range(repeats):
         pos += helix_length  # helix
         positions.append((pos, pos + motif_s1_len))
         pos += motif_s1_len
@@ -425,7 +532,7 @@ def _find_motif_positions(
     pos += helix_length + 4 + helix_length
 
     # 3' arm motif positions (reverse order)
-    for i in range(repeats):
+    for _i in range(repeats):
         positions.append((pos, pos + motif_s2_len))
         pos += motif_s2_len + helix_length
 
@@ -475,7 +582,7 @@ def _setup_logging(
     ]
 
     structlog.configure(
-        processors=processors,
+        processors=processors,  # type: ignore[arg-type]
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
@@ -499,12 +606,24 @@ def _print_config_summary(config) -> None:
     click.echo(
         f"  Motifs per construct: {config.motifs_per_construct_min}-{config.motifs_per_construct_max}"
     )
-    click.echo(f"  Helix length: {config.helix_length} bp")
+    min_h, max_h = config.effective_helix_length_range
+    if min_h == max_h:
+        click.echo(f"  Helix length: {min_h} bp")
+    else:
+        click.echo(f"  Helix length: {min_h}-{max_h} bp")
+    if config.gu_required_above_length is not None:
+        click.echo(f"  GU required above: {config.gu_required_above_length} bp")
     click.echo(f"  Hairpin loop length: {config.hairpin_loop_length} nt")
     click.echo(f"  5' sequence length: {config.p5_length} nt")
     click.echo(f"  3' sequence length: {config.p3_length} nt")
+    if config.spacer_5p_length > 0:
+        click.echo(f"  5' spacer length: {config.spacer_5p_length} nt")
+    if config.spacer_3p_length > 0:
+        click.echo(f"  3' spacer length: {config.spacer_3p_length} nt")
     click.echo(f"  Validation enabled: {config.validation.enabled}")
     click.echo(f"  Target library size: {config.optimization.target_library_size}")
+    if config.optimization.target_motif_usage is not None:
+        click.echo(f"  Target motif usage: {config.optimization.target_motif_usage}")
 
 
 def _print_summary(constructs: list) -> None:

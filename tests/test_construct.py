@@ -50,6 +50,7 @@ class TestConstruct:
 
     def test_to_secstruct(self):
         from rna_secstruct import SecStruct
+
         construct = Construct(
             sequence="GGGAAACCC",
             structure="(((...)))",
@@ -209,12 +210,16 @@ class TestMotifPosition:
 
     def test_all_positions(self):
         motif = Motif.from_string("GAC&GC", "(.(&))")
-        mp = MotifPosition(motif=motif, strand1_positions=[5, 6, 7], strand2_positions=[20, 21])
+        mp = MotifPosition(
+            motif=motif, strand1_positions=[5, 6, 7], strand2_positions=[20, 21]
+        )
         assert mp.all_positions() == [5, 6, 7, 20, 21]
 
     def test_to_string(self):
         motif = Motif.from_string("GAC&GC", "(.(&))")
-        mp = MotifPosition(motif=motif, strand1_positions=[5, 6, 7], strand2_positions=[20, 21])
+        mp = MotifPosition(
+            motif=motif, strand1_positions=[5, 6, 7], strand2_positions=[20, 21]
+        )
         assert mp.to_string() == "[5,6,7,20,21]"
 
 
@@ -311,3 +316,94 @@ class TestAssembleConstructPositions:
         pos_str = construct.get_positions_string()
         assert "M1:" in pos_str
         assert "[3,4,5,14,15]" in pos_str
+
+
+class TestCalculateConstructLengthVariableHelices:
+    """Tests for variable helix lengths in calculate_construct_length."""
+
+    def test_list_helix_lengths(self):
+        length = calculate_construct_length(
+            num_motifs=2,
+            motif_lengths=[5, 6],
+            helix_length=[2, 3, 4],
+            hairpin_length=4,
+            p5_length=5,
+            p3_length=5,
+        )
+        # helix total = (2+3+4) * 2 = 18
+        expected = 5 + 5 + 5 + 6 + 18 + 4
+        assert length == expected
+
+    def test_with_spacers(self):
+        length = calculate_construct_length(
+            num_motifs=1,
+            motif_lengths=[5],
+            helix_length=3,
+            hairpin_length=4,
+            p5_length=5,
+            p3_length=5,
+            spacer_5p_length=2,
+            spacer_3p_length=3,
+        )
+        # helices: 2*3*2=12, total = 5+5+5+12+4+2+3 = 36
+        expected = 5 + 5 + 5 + 2 * 3 * 2 + 4 + 2 + 3
+        assert length == expected
+
+
+class TestAssembleConstructWithSpacers:
+    """Tests for assemble_construct with spacer support."""
+
+    def test_spacers_included_in_sequence(self):
+        motifs = [Motif.from_string("GAC&GC", "(.(&))")]
+        helices = [
+            Helix.from_sequences("AA", "UU", "((", "))"),
+            Helix.from_sequences("CC", "GG", "((", "))"),
+        ]
+        hairpin = Hairpin.from_sequence("GAAA", "....")
+        construct = assemble_construct(
+            motifs=motifs,
+            helices=helices,
+            hairpin=hairpin,
+            p5_seq="G",
+            p5_ss="(",
+            p3_seq="C",
+            p3_ss=")",
+            spacer_5p_seq="AA",
+            spacer_5p_ss="..",
+            spacer_3p_seq="UU",
+            spacer_3p_ss="..",
+        )
+        # Spacers should appear in the sequence
+        assert "AA" in construct.sequence[:5]  # 5' spacer near start
+        assert len(construct.sequence) == len(construct.structure)
+
+    def test_spacers_increase_length(self):
+        motifs = [Motif.from_string("GAC&GC", "(.(&))")]
+        helices = [
+            Helix.from_sequences("AA", "UU", "((", "))"),
+            Helix.from_sequences("CC", "GG", "((", "))"),
+        ]
+        hairpin = Hairpin.from_sequence("GAAA", "....")
+        construct_no_spacer = assemble_construct(
+            motifs=motifs,
+            helices=helices,
+            hairpin=hairpin,
+            p5_seq="G",
+            p5_ss="(",
+            p3_seq="C",
+            p3_ss=")",
+        )
+        construct_with_spacer = assemble_construct(
+            motifs=motifs,
+            helices=helices,
+            hairpin=hairpin,
+            p5_seq="G",
+            p5_ss="(",
+            p3_seq="C",
+            p3_ss=")",
+            spacer_5p_seq="AA",
+            spacer_5p_ss="..",
+            spacer_3p_seq="UU",
+            spacer_3p_ss="..",
+        )
+        assert construct_with_spacer.length() == construct_no_spacer.length() + 4

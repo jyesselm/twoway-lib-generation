@@ -94,12 +94,17 @@ def assemble_construct(
     p5_ss: str,
     p3_seq: str,
     p3_ss: str,
+    spacer_5p_seq: str | None = None,
+    spacer_5p_ss: str | None = None,
+    spacer_3p_seq: str | None = None,
+    spacer_3p_ss: str | None = None,
 ) -> Construct:
     """
     Assemble a complete construct from components using rna_secstruct.
 
     Layout (5' to 3'):
-    P5 -- H -- M1_s1 -- H -- M2_s1 -- ... -- Mn_s1 -- H -- hairpin -- H -- Mn_s2 -- ... -- M1_s2 -- H -- P3
+    P5 -- Spacer5p -- H -- M1_s1 -- H -- ... -- Mn_s1 -- H -- hairpin
+    -- H -- Mn_s2 -- ... -- M1_s2 -- H -- Spacer3p -- P3
 
     Args:
         motifs: List of motifs to include.
@@ -109,6 +114,10 @@ def assemble_construct(
         p5_ss: 5' common structure.
         p3_seq: 3' common sequence.
         p3_ss: 3' common structure.
+        spacer_5p_seq: Optional 5' spacer sequence.
+        spacer_5p_ss: Optional 5' spacer structure.
+        spacer_3p_seq: Optional 3' spacer sequence.
+        spacer_3p_ss: Optional 3' spacer structure.
 
     Returns:
         Assembled Construct object with tracked motif positions.
@@ -121,7 +130,14 @@ def assemble_construct(
         raise ValueError(f"Need {expected_helices} helices, got {len(helices)}")
 
     # Build left arm using SecStruct operations
-    left_ss, strand1_positions = _build_left_arm_secstruct(motifs, helices, p5_seq, p5_ss)
+    left_ss, strand1_positions = _build_left_arm_secstruct(
+        motifs,
+        helices,
+        p5_seq,
+        p5_ss,
+        spacer_5p_seq,
+        spacer_5p_ss,
+    )
 
     # Add hairpin
     hairpin_ss = SecStruct(hairpin.sequence, hairpin.structure)
@@ -129,14 +145,22 @@ def assemble_construct(
 
     # Build right arm
     right_ss, strand2_positions = _build_right_arm_secstruct(
-        motifs, helices, p3_seq, p3_ss, left_length + len(hairpin_ss)
+        motifs,
+        helices,
+        p3_seq,
+        p3_ss,
+        left_length + len(hairpin_ss),
+        spacer_3p_seq,
+        spacer_3p_ss,
     )
 
     # Combine: left + hairpin + right
     full_ss = left_ss + hairpin_ss + right_ss
 
     # Create motif positions
-    motif_positions = _create_motif_positions(motifs, strand1_positions, strand2_positions)
+    motif_positions = _create_motif_positions(
+        motifs, strand1_positions, strand2_positions
+    )
 
     return Construct(
         sequence=full_ss.sequence,
@@ -151,11 +175,13 @@ def _build_left_arm_secstruct(
     helices: list[Helix],
     p5_seq: str,
     p5_ss: str,
+    spacer_5p_seq: str | None = None,
+    spacer_5p_ss: str | None = None,
 ) -> tuple[SecStruct, list[list[int]]]:
     """
     Build the left (5') arm using SecStruct operations.
 
-    Assembles: P5 -- H -- M1_s1 -- H -- M2_s1 -- ... -- Mn_s1 -- H
+    Assembles: P5 -- Spacer5p -- H -- M1_s1 -- H -- ... -- Mn_s1 -- H
 
     Returns:
         Tuple of (SecStruct, strand1_positions) for the left arm.
@@ -163,6 +189,12 @@ def _build_left_arm_secstruct(
     result = SecStruct(p5_seq, p5_ss)
     current_pos = len(p5_seq)
     strand1_positions: list[list[int]] = []
+
+    # Add 5' spacer if provided
+    if spacer_5p_seq is not None and spacer_5p_ss is not None:
+        spacer_ss = SecStruct(spacer_5p_seq, spacer_5p_ss)
+        result = result + spacer_ss
+        current_pos += len(spacer_ss)
 
     for i, motif in enumerate(motifs):
         # Add helix
@@ -190,11 +222,13 @@ def _build_right_arm_secstruct(
     p3_seq: str,
     p3_ss: str,
     start_offset: int,
+    spacer_3p_seq: str | None = None,
+    spacer_3p_ss: str | None = None,
 ) -> tuple[SecStruct, list[list[int]]]:
     """
     Build the right (3') arm using SecStruct operations.
 
-    Assembles: H -- Mn_s2 -- ... -- M2_s2 -- H -- M1_s2 -- H -- P3
+    Assembles: H -- Mn_s2 -- ... -- M1_s2 -- H -- Spacer3p -- P3
 
     Returns:
         Tuple of (SecStruct, strand2_positions) for the right arm.
@@ -216,6 +250,12 @@ def _build_right_arm_secstruct(
         helix_ss = SecStruct(helices[i].strand2, helices[i].structure2)
         result = result + helix_ss
         current_pos += len(helix_ss)
+
+    # Add 3' spacer if provided
+    if spacer_3p_seq is not None and spacer_3p_ss is not None:
+        spacer_ss = SecStruct(spacer_3p_seq, spacer_3p_ss)
+        result = result + spacer_ss
+        current_pos += len(spacer_ss)
 
     # Add P3
     p3_ss_struct = SecStruct(p3_seq, p3_ss)
@@ -245,10 +285,12 @@ def _create_motif_positions(
 def calculate_construct_length(
     num_motifs: int,
     motif_lengths: list[int],
-    helix_length: int,
+    helix_length: int | list[int],
     hairpin_length: int,
     p5_length: int,
     p3_length: int,
+    spacer_5p_length: int = 0,
+    spacer_3p_length: int = 0,
 ) -> int:
     """
     Calculate total length of an assembled construct.
@@ -256,20 +298,31 @@ def calculate_construct_length(
     Args:
         num_motifs: Number of motifs in the construct.
         motif_lengths: Total length of each motif (strand1 + strand2).
-        helix_length: Length of each helix (number of base pairs).
+        helix_length: Length of each helix (int for uniform, list for variable).
         hairpin_length: Length of the hairpin loop.
         p5_length: Length of the 5' common sequence.
         p3_length: Length of the 3' common sequence.
+        spacer_5p_length: Length of 5' spacer sequence.
+        spacer_3p_length: Length of 3' spacer sequence.
 
     Returns:
         Total construct length in nucleotides.
     """
     num_helices = num_motifs + 1
-    total_helix_length = num_helices * helix_length * 2
+    if isinstance(helix_length, list):
+        total_helix_length = sum(helix_length) * 2
+    else:
+        total_helix_length = num_helices * helix_length * 2
     total_motif_length = sum(motif_lengths)
 
     return (
-        p5_length + p3_length + total_motif_length + total_helix_length + hairpin_length
+        p5_length
+        + p3_length
+        + total_motif_length
+        + total_helix_length
+        + hairpin_length
+        + spacer_5p_length
+        + spacer_3p_length
     )
 
 
