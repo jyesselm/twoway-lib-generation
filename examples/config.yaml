@@ -1,11 +1,11 @@
 # Example configuration for two-way junction library generation
 
 target_length:
-  min: 134
-  max: 138
+  min: 149
+  max: 149
 
 motifs_per_construct:
-  min: 6
+  min: 7
   max: 7
 
 # Common 5' and 3' sequences that frame the construct
@@ -31,8 +31,8 @@ allow_wobble_pairs: true  # Allow G-U/U-G wobble pairs in helices
 # Variable helix lengths -- enables the length solver to adjust helix sizes
 # to hit the target length exactly. Without this, only motif combos that
 # happen to produce the right total with fixed helix_length are feasible.
-helix_length_min: 2
-helix_length_max: 4
+helix_length_min: 3
+helix_length_max: 5
 
 # Require GU wobble pair in helices of this length or longer (optional)
 # gu_required_above_length: 4
