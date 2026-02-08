@@ -28,9 +28,11 @@ hairpin_structure: "(....)"
 helix_length: 3
 allow_wobble_pairs: true  # Allow G-U/U-G wobble pairs in helices
 
-# Variable helix lengths (optional, defaults to helix_length if not set)
-# helix_length_min: 2
-# helix_length_max: 4
+# Variable helix lengths -- enables the length solver to adjust helix sizes
+# to hit the target length exactly. Without this, only motif combos that
+# happen to produce the right total with fixed helix_length are feasible.
+helix_length_min: 2
+helix_length_max: 4
 
 # Require GU wobble pair in helices of this length or longer (optional)
 # gu_required_above_length: 4
