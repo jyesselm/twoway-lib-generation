@@ -20,10 +20,13 @@ pip install -e ".[dev]"
 ## Quick Start
 
 ```bash
-# Generate a default config file
-twoway-lib config -o my_config.yaml
+# Generate an annotated example config file
+twoway-lib config init -o my_config.yaml
 
-# Check your configuration and feasible length ranges
+# Validate your configuration
+twoway-lib config validate my_config.yaml
+
+# Check feasible length ranges against your motifs
 twoway-lib check my_config.yaml motifs.csv
 
 # Test which motifs fold correctly
@@ -56,9 +59,27 @@ The pipeline has four stages:
 | `generate` | Generate a library from config and motifs |
 | `check` | Validate config and estimate feasible construct lengths |
 | `test-motifs` | Test each motif for correct folding in helix contexts |
-| `config` | Generate a default config file or validate an existing one |
+| `config init` | Create an annotated example config file |
+| `config validate` | Validate an existing config file |
+| `config show` | Display parsed config values |
 | `summary` | Display summary statistics for a generated library |
 | `primers` | List available 5' and 3' primer sequences |
+
+### Config Subcommands
+
+```bash
+# Create an annotated config with documentation for every parameter
+twoway-lib config init -o my_config.yaml
+
+# Overwrite an existing config file
+twoway-lib config init -o my_config.yaml --force
+
+# Validate a config file and print a summary
+twoway-lib config validate my_config.yaml
+
+# Show all parsed values from a config file
+twoway-lib config show my_config.yaml
+```
 
 ### Generate Options
 
@@ -133,7 +154,7 @@ assignment = random_helix_assignment(budget, num_helices=7, min_length=2, max_le
 
 ## Configuration
 
-See [`examples/config.yaml`](examples/config.yaml) for a complete example. Key sections:
+Run `twoway-lib config init -o config.yaml` to generate an annotated config file with inline documentation for every parameter. See [`examples/config.yaml`](examples/config.yaml) for a filled-in example. Key sections:
 
 ### Target Length & Motif Count
 
