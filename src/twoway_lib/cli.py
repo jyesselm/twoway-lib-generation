@@ -1,15 +1,16 @@
 """Command line interface for two-way junction library generation."""
 
 import sys
+from pathlib import Path
+from typing import Annotated
 
-import click
 import structlog
+import typer
 
 from twoway_lib.config import (
-    generate_default_config,
+    create_example_config,
     list_available_primers,
     load_config,
-    save_config,
 )
 from twoway_lib.generator import LibraryGenerator, estimate_feasible_lengths
 from twoway_lib.helix import random_helix
@@ -17,98 +18,157 @@ from twoway_lib.io import get_library_summary, save_library_json
 from twoway_lib.motif import Motif, load_motifs
 from twoway_lib.validation import fold_sequence
 
+app = typer.Typer(help="Two-way junction RNA library generator.")
 
-@click.group()
-@click.version_option()
-def cli() -> None:
-    """Two-way junction RNA library generator."""
-    pass
+# ---------------------------------------------------------------------------
+# Config subcommand group
+# ---------------------------------------------------------------------------
+config_app = typer.Typer(help="Configuration file management commands.")
+app.add_typer(config_app, name="config")
 
 
-@cli.command()
-@click.argument("config_path", type=click.Path(exists=True))
-@click.argument("motifs_path", type=click.Path(exists=True))
-@click.option("-o", "--output", default="library.json", help="Output JSON file path")
-@click.option(
-    "-n", "--num-candidates", default=50000, help="Number of candidates to generate"
-)
-@click.option(
-    "-s", "--seed", type=int, default=None, help="Random seed for reproducibility"
-)
-@click.option("-v", "--verbose", is_flag=True, help="Enable verbose logging")
-@click.option(
-    "--no-filter-motifs",
-    is_flag=True,
-    help="Don't filter motifs by fold test (use all motifs)",
-)
-@click.option(
-    "--no-color",
-    is_flag=True,
-    help="Disable colored output (for saving to file)",
-)
-@click.option(
-    "--log-json",
-    type=click.Path(),
-    default=None,
-    help="Save log output to JSON file",
-)
-@click.option(
-    "--max-attempts",
-    type=int,
-    default=None,
-    help="Maximum generation attempts (default: num_candidates * 100)",
-)
-@click.option(
-    "--auto-tune",
-    is_flag=True,
-    help="Auto-tune simulated annealing parameters before optimization",
-)
-@click.option(
-    "--parallel",
-    is_flag=True,
-    help="Enable parallel candidate generation",
-)
-@click.option(
-    "--workers",
-    type=int,
-    default=4,
-    help="Number of workers for parallel generation (default: 4)",
-)
-@click.option(
-    "--save-motif-results",
-    type=click.Path(),
-    default=None,
-    help="Save motif preprocessing results to JSON",
-)
-@click.option(
-    "--load-motif-results",
-    type=click.Path(exists=True),
-    default=None,
-    help="Load pre-computed motif preprocessing results",
-)
-@click.option(
-    "--detailed-summary",
-    type=click.Path(),
-    default=None,
-    help="Save detailed summary to JSON file",
-)
+@config_app.command("init")
+def config_init(
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Output config file path")
+    ] = Path("config.yaml"),
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Overwrite existing file")
+    ] = False,
+) -> None:
+    """Create an example config file with documentation."""
+    if output.exists() and not force:
+        print(f"File already exists: {output}", file=sys.stderr)
+        print("Use --force to overwrite.", file=sys.stderr)
+        raise typer.Exit(code=1) from None
+    try:
+        create_example_config(output)
+        print(f"Created example config: {output}")
+        print("Edit the file to customize your library generation settings.")
+    except Exception as e:
+        print(f"Error creating config: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
+
+
+@config_app.command("validate")
+def config_validate(
+    config_path: Annotated[
+        Path, typer.Argument(help="Path to YAML config file", exists=True)
+    ],
+) -> None:
+    """Validate an existing configuration file."""
+    try:
+        cfg = load_config(config_path)
+        print(f"Configuration valid: {config_path}")
+        _print_config_summary(cfg)
+    except Exception as e:
+        print(f"Configuration invalid: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
+
+
+@config_app.command("show")
+def config_show(
+    config_path: Annotated[
+        Path, typer.Argument(help="Path to YAML config file", exists=True)
+    ],
+) -> None:
+    """Load a config and display all parsed values."""
+    try:
+        cfg = load_config(config_path)
+        _print_config_summary(cfg)
+    except Exception as e:
+        print(f"Error loading config: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
+
+
+# ---------------------------------------------------------------------------
+# Top-level commands
+# ---------------------------------------------------------------------------
+
+
+@app.command()
 def generate(
-    config_path: str,
-    motifs_path: str,
-    output: str,
-    num_candidates: int,
-    seed: int | None,
-    verbose: bool,
-    no_filter_motifs: bool,
-    no_color: bool,
-    log_json: str | None,
-    max_attempts: int | None,
-    auto_tune: bool,
-    parallel: bool,
-    workers: int,
-    save_motif_results: str | None,
-    load_motif_results: str | None,
-    detailed_summary: str | None,
+    config_path: Annotated[
+        Path, typer.Argument(help="Path to YAML configuration file", exists=True)
+    ],
+    motifs_path: Annotated[
+        Path, typer.Argument(help="Path to CSV file with motifs", exists=True)
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Output JSON file path")
+    ] = Path("library.json"),
+    num_candidates: Annotated[
+        int,
+        typer.Option("--num-candidates", "-n", help="Number of candidates to generate"),
+    ] = 50000,
+    seed: Annotated[
+        int | None, typer.Option("--seed", "-s", help="Random seed for reproducibility")
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+    no_filter_motifs: Annotated[
+        bool,
+        typer.Option(
+            "--no-filter-motifs",
+            help="Don't filter motifs by fold test (use all motifs)",
+        ),
+    ] = False,
+    no_color: Annotated[
+        bool,
+        typer.Option(
+            "--no-color",
+            help="Disable colored output (for saving to file)",
+        ),
+    ] = False,
+    log_json: Annotated[
+        Path | None,
+        typer.Option("--log-json", help="Save log output to JSON file"),
+    ] = None,
+    max_attempts: Annotated[
+        int | None,
+        typer.Option(
+            "--max-attempts",
+            help="Maximum generation attempts (default: num_candidates * 100)",
+        ),
+    ] = None,
+    auto_tune: Annotated[
+        bool,
+        typer.Option(
+            "--auto-tune",
+            help="Auto-tune simulated annealing parameters before optimization",
+        ),
+    ] = False,
+    parallel: Annotated[
+        bool,
+        typer.Option("--parallel", help="Enable parallel candidate generation"),
+    ] = False,
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            help="Number of workers for parallel generation (default: 4)",
+        ),
+    ] = 4,
+    save_motif_results: Annotated[
+        Path | None,
+        typer.Option(
+            "--save-motif-results",
+            help="Save motif preprocessing results to JSON",
+        ),
+    ] = None,
+    load_motif_results: Annotated[
+        Path | None,
+        typer.Option(
+            "--load-motif-results",
+            help="Load pre-computed motif preprocessing results",
+            exists=True,
+        ),
+    ] = None,
+    detailed_summary: Annotated[
+        Path | None,
+        typer.Option("--detailed-summary", help="Save detailed summary to JSON file"),
+    ] = None,
 ) -> None:
     """
     Generate a two-way junction library.
@@ -116,14 +176,15 @@ def generate(
     CONFIG_PATH: Path to YAML configuration file
     MOTIFS_PATH: Path to CSV file with motifs
     """
-    log_collector = _setup_logging(verbose, no_color, log_json)
+    log_json_str = str(log_json) if log_json else None
+    log_collector = _setup_logging(verbose, no_color, log_json_str)
     log = structlog.get_logger()
 
     try:
         config = load_config(config_path)
         motifs = load_motifs(motifs_path)
-        log.info("Loaded config", path=config_path)
-        log.info("Loaded motifs", count=len(motifs), path=motifs_path)
+        log.info("Loaded config", path=str(config_path))
+        log.info("Loaded motifs", count=len(motifs), path=str(motifs_path))
 
         # Handle motif preprocessing results
         motif_results = None
@@ -132,10 +193,10 @@ def generate(
                 load_motif_results as load_results,
             )
 
-            motif_results = load_results(load_motif_results)
+            motif_results = load_results(str(load_motif_results))
             log.info(
                 "Loaded motif results",
-                path=load_motif_results,
+                path=str(load_motif_results),
                 count=len(motif_results),
             )
 
@@ -158,8 +219,8 @@ def generate(
                 motifs,
                 helix_length=config.helix_length,
             )
-            save_results(results, save_motif_results)
-            log.info("Saved motif results", path=save_motif_results)
+            save_results(results, str(save_motif_results))
+            log.info("Saved motif results", path=str(save_motif_results))
 
         constructs = generator.generate(
             num_candidates,
@@ -169,8 +230,8 @@ def generate(
             n_workers=workers,
         )
 
-        save_library_json(constructs, output)
-        log.info("Saved constructs", count=len(constructs), path=output)
+        save_library_json(constructs, str(output))
+        log.info("Saved constructs", count=len(constructs), path=str(output))
 
         if detailed_summary:
             from twoway_lib.io import save_detailed_summary
@@ -182,10 +243,10 @@ def generate(
                 test_result_dicts = [asdict(r) for r in motif_results]
             save_detailed_summary(
                 constructs,
-                detailed_summary,
+                str(detailed_summary),
                 motif_test_results=test_result_dicts,
             )
-            log.info("Saved detailed summary", path=detailed_summary)
+            log.info("Saved detailed summary", path=str(detailed_summary))
 
         _print_summary(constructs)
         log_collector.save()
@@ -193,13 +254,18 @@ def generate(
     except Exception as e:
         log.error("Error during generation", error=str(e))
         log_collector.save()
-        sys.exit(1)
+        raise typer.Exit(code=1) from None
 
 
-@cli.command()
-@click.argument("config_path", type=click.Path(exists=True))
-@click.argument("motifs_path", type=click.Path(exists=True))
-def check(config_path: str, motifs_path: str) -> None:
+@app.command()
+def check(
+    config_path: Annotated[
+        Path, typer.Argument(help="Path to YAML configuration file", exists=True)
+    ],
+    motifs_path: Annotated[
+        Path, typer.Argument(help="Path to CSV file with motifs", exists=True)
+    ],
+) -> None:
     """
     Check configuration and estimate feasible lengths.
 
@@ -210,37 +276,38 @@ def check(config_path: str, motifs_path: str) -> None:
         config = load_config(config_path)
         motifs = load_motifs(motifs_path)
 
-        click.echo(f"Configuration loaded: {config_path}")
-        click.echo(f"Motifs loaded: {len(motifs)} motifs from {motifs_path}")
-        click.echo()
+        print(f"Configuration loaded: {config_path}")
+        print(f"Motifs loaded: {len(motifs)} motifs from {motifs_path}")
+        print()
 
         _print_config_summary(config)
-        click.echo()
+        print()
 
         min_len, max_len = estimate_feasible_lengths(config, motifs)
-        click.echo("Estimated feasible length range:")
-        click.echo(f"  Minimum: {min_len} nt")
-        click.echo(f"  Maximum: {max_len} nt")
-        click.echo(
-            f"  Target:  {config.target_length_min}-{config.target_length_max} nt"
-        )
-        click.echo()
+        print("Estimated feasible length range:")
+        print(f"  Minimum: {min_len} nt")
+        print(f"  Maximum: {max_len} nt")
+        print(f"  Target:  {config.target_length_min}-{config.target_length_max} nt")
+        print()
 
         if min_len > config.target_length_max:
-            click.echo("WARNING: Minimum feasible length exceeds target maximum!")
+            print("WARNING: Minimum feasible length exceeds target maximum!")
         elif max_len < config.target_length_min:
-            click.echo("WARNING: Maximum feasible length is below target minimum!")
+            print("WARNING: Maximum feasible length is below target minimum!")
         else:
-            click.echo("Configuration appears feasible.")
+            print("Configuration appears feasible.")
 
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
 
 
-@cli.command()
-@click.argument("library_path", type=click.Path(exists=True))
-def summary(library_path: str) -> None:
+@app.command()
+def summary(
+    library_path: Annotated[
+        Path, typer.Argument(help="Path to library JSON file", exists=True)
+    ],
+) -> None:
     """
     Display summary statistics for a generated library.
 
@@ -249,103 +316,71 @@ def summary(library_path: str) -> None:
     from twoway_lib.io import load_library_json
 
     try:
-        rows = load_library_json(library_path)
-        click.echo(f"Library: {library_path}")
-        click.echo(f"Constructs: {len(rows)}")
+        rows = load_library_json(str(library_path))
+        print(f"Library: {library_path}")
+        print(f"Constructs: {len(rows)}")
 
         if rows:
             lengths = [r["length"] for r in rows]
-            click.echo(f"Length range: {min(lengths)}-{max(lengths)} nt")
-            click.echo(f"Average length: {sum(lengths) / len(lengths):.1f} nt")
+            print(f"Length range: {min(lengths)}-{max(lengths)} nt")
+            print(f"Average length: {sum(lengths) / len(lengths):.1f} nt")
 
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(code=1) from None
 
 
-@cli.command()
-@click.option("-o", "--output", default="config.yaml", help="Output config file path")
-@click.option(
-    "--validate",
-    "validate_path",
-    type=click.Path(exists=True),
-    help="Validate an existing config file instead of generating",
-)
-def config(output: str, validate_path: str | None) -> None:
-    """
-    Generate a default config file or validate an existing one.
-
-    Use --validate to check an existing configuration file.
-    """
-    if validate_path:
-        try:
-            cfg = load_config(validate_path)
-            click.echo(f"Configuration valid: {validate_path}")
-            _print_config_summary(cfg)
-        except Exception as e:
-            click.echo(f"Configuration invalid: {e}", err=True)
-            sys.exit(1)
-    else:
-        try:
-            cfg = generate_default_config()
-            save_config(cfg, output)
-            click.echo(f"Generated default config: {output}")
-            click.echo("Edit the file to customize your library generation settings.")
-        except Exception as e:
-            click.echo(f"Error generating config: {e}", err=True)
-            sys.exit(1)
-
-
-@cli.command()
+@app.command()
 def primers() -> None:
     """List available p5 and p3 primer sequences."""
     available = list_available_primers()
 
-    click.echo("Available p5 sequences:")
+    print("Available p5 sequences:")
     if available["p5"]:
         for name in available["p5"]:
-            click.echo(f"  - {name}")
+            print(f"  - {name}")
     else:
-        click.echo("  (none available - seq_tools package may not be installed)")
+        print("  (none available - seq_tools package may not be installed)")
 
-    click.echo()
-    click.echo("Available p3 sequences:")
+    print()
+    print("Available p3 sequences:")
     if available["p3"]:
         for name in available["p3"]:
-            click.echo(f"  - {name}")
+            print(f"  - {name}")
     else:
-        click.echo("  (none available - seq_tools package may not be installed)")
+        print("  (none available - seq_tools package may not be installed)")
 
-    click.echo()
-    click.echo("Use p5_name or p3_name in your config file to reference these by name.")
+    print()
+    print("Use p5_name or p3_name in your config file to reference these by name.")
 
 
-@cli.command("test-motifs")
-@click.argument("motifs_path", type=click.Path(exists=True))
-@click.option(
-    "-r",
-    "--repeats",
-    default=10,
-    help="Number of times to repeat motif in test construct",
-)
-@click.option("-l", "--helix-length", default=3, help="Length of flanking helices")
-@click.option(
-    "-s", "--seed", type=int, default=42, help="Random seed for helix generation"
-)
-@click.option("-v", "--verbose", is_flag=True, help="Show detailed mismatch info")
-@click.option(
-    "--save-results",
-    type=click.Path(),
-    default=None,
-    help="Save motif test results to JSON file",
-)
+@app.command("test-motifs")
 def test_motifs(
-    motifs_path: str,
-    repeats: int,
-    helix_length: int,
-    seed: int,
-    verbose: bool,
-    save_results: str | None,
+    motifs_path: Annotated[
+        Path, typer.Argument(help="Path to CSV file with motifs", exists=True)
+    ],
+    repeats: Annotated[
+        int,
+        typer.Option(
+            "--repeats",
+            "-r",
+            help="Number of times to repeat motif in test construct",
+        ),
+    ] = 10,
+    helix_length: Annotated[
+        int, typer.Option("--helix-length", "-l", help="Length of flanking helices")
+    ] = 3,
+    seed: Annotated[
+        int,
+        typer.Option("--seed", "-s", help="Random seed for helix generation"),
+    ] = 42,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Show detailed mismatch info")
+    ] = False,
+    save_results: Annotated[
+        Path | None,
+        typer.Option("--save-results", help="Save motif test results to JSON file"),
+    ] = None,
 ) -> None:
     """
     Test each motif for correct folding in a helix context.
@@ -360,10 +395,10 @@ def test_motifs(
     motifs = load_motifs(motifs_path)
     rng = Random(seed)
 
-    click.echo(f"Testing {len(motifs)} motifs with {repeats} repeats each")
-    click.echo(f"Helix length: {helix_length} bp")
-    click.echo("=" * 70)
-    click.echo()
+    print(f"Testing {len(motifs)} motifs with {repeats} repeats each")
+    print(f"Helix length: {helix_length} bp")
+    print("=" * 70)
+    print()
 
     results = []
     for motif in motifs:
@@ -371,29 +406,34 @@ def test_motifs(
         results.append(result)
 
     # Summary
-    click.echo()
-    click.echo("=" * 70)
-    click.echo("SUMMARY")
-    click.echo("=" * 70)
+    print()
+    print("=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
 
     passing = [r for r in results if r["passes"]]
     failing = [r for r in results if not r["passes"]]
 
-    click.echo(f"Passing motifs: {len(passing)}/{len(results)}")
-    click.echo(f"Failing motifs: {len(failing)}/{len(results)}")
+    print(f"Passing motifs: {len(passing)}/{len(results)}")
+    print(f"Failing motifs: {len(failing)}/{len(results)}")
 
     if failing:
-        click.echo()
-        click.echo("Failing motifs (structure mismatch in motif region):")
+        print()
+        print("Failing motifs (structure mismatch in motif region):")
         for r in failing:
-            click.echo(f"  {r['motif']:20s} match: {r['motif_match']:.1%}")
+            print(f"  {r['motif']:20s} match: {r['motif_match']:.1%}")
 
     if save_results:
         import json
 
         with open(save_results, "w") as f:
             json.dump(results, f, indent=2)
-        click.echo(f"\nResults saved to {save_results}")
+        print(f"\nResults saved to {save_results}")
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers (preserved from Click version)
+# ---------------------------------------------------------------------------
 
 
 def _test_single_motif(
@@ -483,22 +523,22 @@ def _test_single_motif(
     # Build output line
     status = "PASS" if passes else "FAIL"
     if passes:
-        click.echo(f"{motif.sequence:15s} {status}")
+        print(f"{motif.sequence:15s} {status}")
     else:
         # Show designed vs predicted structure for this motif
-        click.echo(
+        print(
             f"{motif.sequence:15s} {status}  "
             f"failed {instances_failed}/{len(motif_positions)} instances  "
             f"designed: {motif.structure}  predicted: {mismatch_examples[0]['predicted']}"
         )
 
     if verbose and not passes:
-        click.echo(
+        print(
             f"  Example: seq={mismatch_examples[0]['seq']}  "
             f"designed={mismatch_examples[0]['designed']}  "
             f"predicted={mismatch_examples[0]['predicted']}"
         )
-        click.echo()
+        print()
 
     return {
         "motif": motif.sequence,
@@ -599,51 +639,51 @@ def _setup_logging(
 
 def _print_config_summary(config) -> None:
     """Print configuration summary."""
-    click.echo("Configuration summary:")
-    click.echo(
-        f"  Target length: {config.target_length_min}-{config.target_length_max} nt"
-    )
-    click.echo(
-        f"  Motifs per construct: {config.motifs_per_construct_min}-{config.motifs_per_construct_max}"
+    print("Configuration summary:")
+    print(f"  Target length: {config.target_length_min}-{config.target_length_max} nt")
+    print(
+        f"  Motifs per construct: "
+        f"{config.motifs_per_construct_min}-{config.motifs_per_construct_max}"
     )
     min_h, max_h = config.effective_helix_length_range
     if min_h == max_h:
-        click.echo(f"  Helix length: {min_h} bp")
+        print(f"  Helix length: {min_h} bp")
     else:
-        click.echo(f"  Helix length: {min_h}-{max_h} bp")
+        print(f"  Helix length: {min_h}-{max_h} bp")
     if config.gu_required_above_length is not None:
-        click.echo(f"  GU required above: {config.gu_required_above_length} bp")
-    click.echo(f"  Hairpin loop length: {config.hairpin_loop_length} nt")
-    click.echo(f"  5' sequence length: {config.p5_length} nt")
-    click.echo(f"  3' sequence length: {config.p3_length} nt")
+        print(f"  GU required above: {config.gu_required_above_length} bp")
+    print(f"  Hairpin loop length: {config.hairpin_loop_length} nt")
+    print(f"  5' sequence length: {config.p5_length} nt")
+    print(f"  3' sequence length: {config.p3_length} nt")
     if config.spacer_5p_length > 0:
-        click.echo(f"  5' spacer length: {config.spacer_5p_length} nt")
+        print(f"  5' spacer length: {config.spacer_5p_length} nt")
     if config.spacer_3p_length > 0:
-        click.echo(f"  3' spacer length: {config.spacer_3p_length} nt")
-    click.echo(f"  Validation enabled: {config.validation.enabled}")
-    click.echo(f"  Target library size: {config.optimization.target_library_size}")
+        print(f"  3' spacer length: {config.spacer_3p_length} nt")
+    print(f"  Validation enabled: {config.validation.enabled}")
+    print(f"  Target library size: {config.optimization.target_library_size}")
     if config.optimization.target_motif_usage is not None:
-        click.echo(f"  Target motif usage: {config.optimization.target_motif_usage}")
+        print(f"  Target motif usage: {config.optimization.target_motif_usage}")
 
 
 def _print_summary(constructs: list) -> None:
     """Print generation summary."""
-    summary = get_library_summary(constructs)
-    click.echo()
-    click.echo("Generation complete!")
-    click.echo(f"  Total constructs: {summary['count']}")
-    if summary["count"] > 0:
-        click.echo(
-            f"  Length range: {summary['length_min']}-{summary['length_max']} nt"
+    lib_summary = get_library_summary(constructs)
+    print()
+    print("Generation complete!")
+    print(f"  Total constructs: {lib_summary['count']}")
+    if lib_summary["count"] > 0:
+        print(
+            f"  Length range: {lib_summary['length_min']}-{lib_summary['length_max']} nt"
         )
-        click.echo(f"  Average length: {summary['length_mean']:.1f} nt")
-        click.echo(f"  Unique motifs used: {summary['unique_motifs_used']}")
-        click.echo(
-            f"  Motif usage range: {summary['motif_usage_min']}-{summary['motif_usage_max']} "
-            f"(avg: {summary['motif_usage_mean']:.1f})"
+        print(f"  Average length: {lib_summary['length_mean']:.1f} nt")
+        print(f"  Unique motifs used: {lib_summary['unique_motifs_used']}")
+        print(
+            f"  Motif usage range: {lib_summary['motif_usage_min']}-"
+            f"{lib_summary['motif_usage_max']} "
+            f"(avg: {lib_summary['motif_usage_mean']:.1f})"
         )
-        click.echo(f"  Average edit distance: {summary['avg_edit_distance']:.1f}")
+        print(f"  Average edit distance: {lib_summary['avg_edit_distance']:.1f}")
 
 
 if __name__ == "__main__":
-    cli()
+    app()

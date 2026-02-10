@@ -417,6 +417,153 @@ def _validate_spacer_sequences(config: LibraryConfig) -> None:
             )
 
 
+def create_example_config(output_path: Path | str) -> None:
+    """
+    Create an example configuration file with inline documentation.
+
+    Writes a YAML file with section headers and per-field comments
+    explaining every parameter. The output is directly parseable by
+    load_config().
+
+    Args:
+        output_path: Where to write the example config file.
+    """
+    example = """\
+# Two-Way Junction Library Configuration
+# Edit values below to customize your library generation.
+
+# =============================================================================
+# TARGET LENGTH - Total construct length in nucleotides
+# =============================================================================
+target_length:
+  # Minimum construct length (must be >= 50)
+  min: 100
+  # Maximum construct length (must be >= min)
+  max: 130
+
+# =============================================================================
+# MOTIFS PER CONSTRUCT - How many motifs to include in each construct
+# =============================================================================
+motifs_per_construct:
+  # Minimum motifs per construct (must be >= 1)
+  min: 6
+  # Maximum motifs per construct (must be >= min)
+  max: 7
+
+# =============================================================================
+# PRIMER SEQUENCES - 5' and 3' common regions flanking the variable region
+# You can specify sequences directly or use named primers (p5_name / p3_name).
+# =============================================================================
+# Direct sequence specification:
+p5_sequence: "GGGCGAAAGCCC"
+p5_structure: "((((....))))"
+
+p3_sequence: "AAAGAAACAACAACAACAAC"
+p3_structure: "...................."
+
+# Or use named primers from seq_tools (uncomment to use):
+# p5_name: "T7_P5"
+# p3_name: "tail_P3"
+
+# =============================================================================
+# HAIRPIN LOOP - The loop at the end of the hairpin construct
+# =============================================================================
+# Length of random hairpin loop (used when hairpin_sequence is not set)
+hairpin_loop_length: 4
+
+# Optional: specify an exact hairpin loop sequence and structure.
+# When set, hairpin_loop_length is derived from the sequence length.
+# hairpin_sequence: "GAAA"
+# hairpin_structure: "...."
+
+# =============================================================================
+# HELIX SETTINGS - Random helices separating motifs
+# =============================================================================
+# Default helix length in base pairs (must be >= 1)
+helix_length: 3
+
+# Optional: allow variable helix lengths (range).
+# When set, each helix is randomly assigned a length in [min, max].
+# helix_length_min: 3
+# helix_length_max: 5
+
+# Optional: require at least one G-U wobble pair in helices at or above
+# this length. Helps avoid overly stable helices.
+# gu_required_above_length: 5
+
+# Allow G-U / U-G wobble pairs in random helices (default: false)
+allow_wobble_pairs: false
+
+# Allow motifs to be inserted in both orientations (default: false)
+allow_motif_flip: false
+
+# =============================================================================
+# SPACER SEQUENCES - Optional linkers between primers and the variable region
+# =============================================================================
+# 5' spacer: inserted between p5 and the first helix
+# spacer_5p_sequence: "AA"
+# spacer_5p_structure: ".."
+
+# 3' spacer: inserted between the last helix and p3
+# spacer_3p_sequence: "AA"
+# spacer_3p_structure: ".."
+
+# =============================================================================
+# VALIDATION - Vienna RNA fold validation of generated constructs
+# =============================================================================
+validation:
+  # Enable/disable fold validation (default: true)
+  enabled: true
+
+  # Maximum ensemble defect allowed (lower = stricter, must be >= 0)
+  max_ensemble_defect: 3.0
+
+  # Allow minor differences between designed and predicted structure
+  allow_structure_differences: false
+
+  # Minimum fraction of positions matching predicted structure (0.0-1.0)
+  min_structure_match: 0.9
+
+  # Reject constructs with long runs of the same nucleotide
+  avoid_consecutive_nucleotides: true
+  # Maximum allowed consecutive identical nucleotides
+  max_consecutive_nucleotides: 4
+
+  # Reject constructs with long runs of G-C pairs
+  avoid_consecutive_gc_pairs: true
+  # Maximum allowed consecutive G-C base pairs
+  max_consecutive_gc_pairs: 3
+
+# =============================================================================
+# OPTIMIZATION - Simulated annealing for library selection
+# =============================================================================
+optimization:
+  # Number of simulated annealing iterations
+  iterations: 100000
+
+  # Starting temperature for simulated annealing (must be > 0)
+  initial_temperature: 10.0
+
+  # Temperature decrease per iteration (must be > 0)
+  cooling_rate: 0.00001
+
+  # Desired number of constructs in the final library (must be >= 1)
+  target_library_size: 3000
+
+  # Optional: constrain per-motif usage counts
+  # min_motif_usage: 10
+  # max_motif_usage: 100
+
+  # Weight balancing motif usage uniformity vs sequence diversity (default: 1.0)
+  # motif_usage_weight: 1.0
+
+  # Optional: target usage count per motif (overrides min/max if set)
+  # target_motif_usage: 50
+"""
+    output_path = Path(output_path)
+    output_path.write_text(example)
+
+
 def generate_default_config() -> LibraryConfig:
     """
     Generate a default configuration with example values.

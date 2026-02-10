@@ -8,6 +8,7 @@ from twoway_lib.config import (
     LibraryConfig,
     OptimizationConfig,
     ValidationConfig,
+    create_example_config,
     generate_default_config,
     get_p3_sequences,
     get_p5_sequences,
@@ -518,3 +519,38 @@ class TestTargetMotifUsageConfig:
         save_config(config, path)
         loaded = load_config(path)
         assert loaded.optimization.target_motif_usage == 50
+
+
+class TestCreateExampleConfig:
+    """Tests for create_example_config function."""
+
+    def test_creates_file(self, temp_dir: Path):
+        output = temp_dir / "example.yaml"
+        create_example_config(output)
+        assert output.exists()
+
+    def test_output_is_valid_yaml(self, temp_dir: Path):
+        output = temp_dir / "example.yaml"
+        create_example_config(output)
+        config = load_config(output)
+        assert isinstance(config, LibraryConfig)
+        validate_config(config)
+
+    def test_contains_comment_sections(self, temp_dir: Path):
+        output = temp_dir / "example.yaml"
+        create_example_config(output)
+        content = output.read_text()
+        assert "# ===" in content
+        assert "TARGET LENGTH" in content
+        assert "VALIDATION" in content
+        assert "OPTIMIZATION" in content
+
+    def test_contains_key_parameters(self, temp_dir: Path):
+        output = temp_dir / "example.yaml"
+        create_example_config(output)
+        content = output.read_text()
+        assert "target_length:" in content
+        assert "motifs_per_construct:" in content
+        assert "p5_sequence:" in content
+        assert "p3_sequence:" in content
+        assert "helix_length:" in content
