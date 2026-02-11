@@ -17,7 +17,7 @@ You also need ViennaRNA installed for RNA folding predictions.
 ## Files
 
 - `config.yaml` -- Library generation settings (lengths, helices, validation)
-- `motifs.csv` -- Two-way junction motifs from crystal structures (8 motifs)
+- `sampled.csv` -- Two-way junction motifs from crystal structures (8 motifs)
 
 ## Step 1: Inspect the motifs
 
@@ -42,7 +42,7 @@ Before generating, test each motif by embedding it in random helix contexts
 and checking if ViennaRNA predicts the designed structure:
 
 ```bash
-twoway-lib test-motifs motifs.csv
+twoway-lib test-motifs sampled.csv
 ```
 
 This will show PASS/FAIL for each motif. Two motifs (`UAA&UG` and `UG&UAA`)
@@ -52,7 +52,7 @@ filtered out during generation.
 You can save the results for later reuse:
 
 ```bash
-twoway-lib test-motifs motifs.csv --save-results motif_results.json
+twoway-lib test-motifs sampled.csv --save-results motif_results.json
 ```
 
 ## Step 3: Check configuration feasibility
@@ -60,7 +60,7 @@ twoway-lib test-motifs motifs.csv --save-results motif_results.json
 Verify that your config can produce constructs at the target length:
 
 ```bash
-twoway-lib check config.yaml motifs.csv
+twoway-lib check config.yaml sampled.csv
 ```
 
 Expected output:
@@ -87,7 +87,7 @@ Configuration appears feasible.
 Generate 100 candidate constructs (use more for a real library):
 
 ```bash
-twoway-lib generate config.yaml motifs.csv \
+twoway-lib generate config.yaml sampled.csv \
     -o library.json \
     -n 100 \
     -s 42
@@ -129,7 +129,7 @@ For a real experiment, generate many candidates and let simulated annealing
 select a diverse subset:
 
 ```bash
-twoway-lib generate config.yaml motifs.csv \
+twoway-lib generate config.yaml sampled.csv \
     -o library_large.json \
     -n 50000 \
     -s 42 \
