@@ -1,5 +1,6 @@
 """Motif representation and parsing for two-way junctions."""
 
+import json
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -244,3 +245,92 @@ def validate_motif(motif: Motif) -> None:
         raise ValueError(
             f"Unbalanced parentheses in motif: {open_count} opens, {close_count} closes"
         )
+
+
+@dataclass
+class CuratedMotifEntry:
+    """A curated motif entry from PDB crystal structures.
+
+    Attributes:
+        motif_id: Unique identifier (e.g., "TWOWAY-1-0-GCG-CC-8GLP-2").
+        pdb_id: Source PDB structure ID.
+        sequence: Full motif sequence with & separator and flanking bp.
+        structure: Full motif structure with & separator and flanking bp.
+        motif_topology: Topology descriptor (e.g., "1-0", "3-2").
+        is_bulge: Whether this is a bulge motif.
+    """
+
+    motif_id: str
+    pdb_id: str
+    sequence: str
+    structure: str
+    motif_topology: str
+    is_bulge: bool
+
+
+def _parse_curated_entry(entry: dict) -> CuratedMotifEntry:
+    """Parse a single JSON entry into a CuratedMotifEntry.
+
+    Args:
+        entry: Raw dictionary from JSON.
+
+    Returns:
+        Validated CuratedMotifEntry.
+
+    Raises:
+        ValueError: If entry format is invalid.
+    """
+    sequence = entry["sequence"].upper().replace("-", "&").replace("T", "U")
+    structure = entry["structure"]
+
+    if sequence.count("&") != 1:
+        raise ValueError(f"Sequence must contain exactly one '&': {sequence}")
+    if structure.count("&") != 1:
+        raise ValueError(f"Structure must contain exactly one '&': {structure}")
+
+    seq_parts = sequence.split("&")
+    ss_parts = structure.split("&")
+    if len(seq_parts[0]) != len(ss_parts[0]) or len(seq_parts[1]) != len(ss_parts[1]):
+        raise ValueError(
+            f"Strand lengths mismatch between sequence and structure: "
+            f"{sequence} vs {structure}"
+        )
+
+    return CuratedMotifEntry(
+        motif_id=entry["motif_id"],
+        pdb_id=entry["pdb_id"],
+        sequence=sequence,
+        structure=structure,
+        motif_topology=entry["motif_topology"],
+        is_bulge=entry["is_bulge"],
+    )
+
+
+def load_curated_motifs(path: Path | str) -> list[CuratedMotifEntry]:
+    """Load curated motifs from a JSON file.
+
+    The JSON format uses '-' as strand separator in the sequence field
+    and '&' in the structure field. Each entry includes flanking base
+    pairs from the crystal structure.
+
+    Args:
+        path: Path to curated motifs JSON file.
+
+    Returns:
+        List of CuratedMotifEntry objects.
+
+    Raises:
+        FileNotFoundError: If file doesn't exist.
+        ValueError: If JSON format is invalid.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Curated motifs file not found: {path}")
+
+    with path.open() as fh:
+        try:
+            data = json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON in {path}: {exc}") from exc
+
+    return [_parse_curated_entry(entry) for entry in data]

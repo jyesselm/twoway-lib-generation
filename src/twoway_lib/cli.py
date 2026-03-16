@@ -431,6 +431,63 @@ def test_motifs(
         print(f"\nResults saved to {save_results}")
 
 
+@app.command("predict-structures")
+def predict_structures(
+    curated_path: Annotated[
+        Path, typer.Argument(help="Path to curated motifs JSON file", exists=True)
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", "-o", help="Output CSV file path")
+    ] = Path("predicted_motifs.csv"),
+    num_contexts: Annotated[
+        int,
+        typer.Option(
+            "--num-contexts",
+            "-c",
+            help="Number of helix contexts to test each motif",
+        ),
+    ] = 50,
+    helix_length: Annotated[
+        int,
+        typer.Option("--helix-length", "-l", help="Length of flanking helices"),
+    ] = 3,
+    seed: Annotated[
+        int, typer.Option("--seed", "-s", help="Random seed for reproducibility")
+    ] = 42,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Enable verbose logging")
+    ] = False,
+) -> None:
+    """Predict ViennaRNA structures for curated PDB motifs.
+
+    Loads motifs from a curated JSON file, embeds each in multiple random
+    helix contexts, folds with ViennaRNA, and outputs a CSV with predicted
+    structures. The output CSV is compatible with the generate command.
+
+    CURATED_PATH: Path to curated motifs JSON file
+    """
+    from twoway_lib.motif import load_curated_motifs
+    from twoway_lib.preprocessing import (
+        predict_motif_structures,
+        save_predicted_motifs_csv,
+    )
+
+    entries = load_curated_motifs(curated_path)
+    print(f"Loaded {len(entries)} curated motifs from {curated_path}")
+    print(
+        f"Contexts per motif: {num_contexts}  helix length: {helix_length} bp  seed: {seed}"
+    )
+    print()
+
+    if verbose:
+        _setup_logging(verbose=True)
+
+    results = predict_motif_structures(entries, num_contexts, helix_length, seed)
+    save_predicted_motifs_csv(results, output)
+
+    _print_predict_summary(results, output)
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers (preserved from Click version)
 # ---------------------------------------------------------------------------
@@ -663,6 +720,30 @@ def _print_config_summary(config) -> None:
     print(f"  Target library size: {config.optimization.target_library_size}")
     if config.optimization.target_motif_usage is not None:
         print(f"  Target motif usage: {config.optimization.target_motif_usage}")
+
+
+def _print_predict_summary(results: list, output: Path) -> None:
+    """Print predict-structures summary to stdout.
+
+    Args:
+        results: List of PredictedMotifResult objects.
+        output: Path where the CSV was written.
+    """
+    total = len(results)
+    matching = sum(1 for r in results if r.match_fraction == 1.0)
+    differing = total - matching
+    avg_agreement = (
+        sum(r.consensus_agreement for r in results) / total if total else 0.0
+    )
+
+    print("=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    print(f"Total motifs processed:        {total}")
+    print(f"Structure matches PDB:         {matching}")
+    print(f"Structure differs from PDB:    {differing}")
+    print(f"Average consensus agreement:   {avg_agreement:.1%}")
+    print(f"Output written to:             {output}")
 
 
 def _print_summary(constructs: list) -> None:

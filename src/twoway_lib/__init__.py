@@ -6,7 +6,7 @@ from twoway_lib.generator import LibraryGenerator
 from twoway_lib.hairpin import Hairpin
 from twoway_lib.helix import Helix
 from twoway_lib.length_solver import compute_helix_budget, random_helix_assignment
-from twoway_lib.motif import Motif, load_motifs
+from twoway_lib.motif import CuratedMotifEntry, Motif, load_curated_motifs, load_motifs
 from twoway_lib.preprocessing import MotifTestResult, preprocess_motifs
 
 __version__ = "0.1.0"
@@ -14,7 +14,9 @@ __version__ = "0.1.0"
 __all__ = [
     "LibraryConfig",
     "load_config",
+    "CuratedMotifEntry",
     "Motif",
+    "load_curated_motifs",
     "load_motifs",
     "Helix",
     "Hairpin",

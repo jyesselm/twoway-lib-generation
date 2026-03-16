@@ -5,8 +5,8 @@ target_length:
   max: 149
 
 motifs_per_construct:
-  min: 7
-  max: 7
+  min: 5
+  max: 8
 
 # Common 5' and 3' sequences that frame the construct
 # Using balanced sequences from seq_tools resources
@@ -60,6 +60,6 @@ optimization:
   iterations: 10000
   initial_temperature: 10.0
   cooling_rate: 0.00001
-  target_library_size: 3000
+  target_library_size: 300
   max_attempts: 100
-  # target_motif_usage: 50  # Desired usage count per motif (optional)
+  target_motif_usage: 10  # Desired usage count per motif (optional)
