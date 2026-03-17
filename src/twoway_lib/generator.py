@@ -124,15 +124,22 @@ class LibraryGenerator:
         self.stats = GenerationStats(0, 0, 0, 0, 0)
         self._motif_usage = {m.sequence: 0 for m in self.motifs}
 
-        logger.info("Generating candidate constructs", count=num_candidates)
-
         if parallel:
+            logger.info(
+                "Generating candidate constructs (parallel)",
+                count=num_candidates,
+                workers=n_workers,
+            )
             candidates = self._generate_candidates_parallel(
                 num_candidates,
                 max_attempts,
                 n_workers,
             )
         else:
+            logger.info(
+                "Generating candidate constructs (serial)",
+                count=num_candidates,
+            )
             candidates = self._generate_candidates(num_candidates, max_attempts)
 
         logger.info("Generated valid candidates", count=len(candidates))
@@ -475,14 +482,13 @@ class LibraryGenerator:
                 if not any(run in motif for motif in motif_sequences):
                     return False, f"{run} at position {pos + p5_len}"
 
-        # Check consecutive GC pairs
+        # Check consecutive GC pairs (excluding runs entirely within motifs)
         if val_config.avoid_consecutive_gc_pairs:
-            from twoway_lib.validation import has_consecutive_gc_pairs
-
-            if has_consecutive_gc_pairs(
-                core_seq,
-                core_ss,
+            if _has_non_motif_gc_runs(
+                construct,
                 val_config.max_consecutive_gc_pairs,
+                p5_len,
+                p3_len,
             ):
                 return (
                     False,
@@ -519,6 +525,55 @@ class LibraryGenerator:
         return [candidates[i] for i in selected_indices]
 
 
+def _has_non_motif_gc_runs(
+    construct: Construct,
+    max_count: int,
+    p5_len: int = 0,
+    p3_len: int = 0,
+) -> bool:
+    """Check for consecutive GC pair runs that aren't entirely within motifs.
+
+    GC runs that fall entirely within a motif's positions or within
+    the fixed p5/p3 primer regions are allowed. Only runs that extend
+    into helix regions are flagged.
+
+    Args:
+        construct: Construct to check.
+        max_count: Maximum allowed consecutive GC pairs.
+        p5_len: Length of 5' primer to exclude.
+        p3_len: Length of 3' primer to exclude.
+
+    Returns:
+        True if there are violating GC runs outside motifs.
+    """
+    from twoway_lib.validation import find_gc_pair_runs_with_positions
+
+    runs = find_gc_pair_runs_with_positions(construct.sequence, construct.structure)
+    allowed = _get_allowed_positions(construct, p5_len, p3_len)
+
+    for run_positions, run_length in runs:
+        if run_length < max_count:
+            continue
+        if not run_positions.issubset(allowed):
+            return True
+    return False
+
+
+def _get_allowed_positions(
+    construct: Construct, p5_len: int, p3_len: int
+) -> set[int]:
+    """Get positions where GC runs are allowed (motifs + primers)."""
+    positions: set[int] = set()
+    # Motif positions
+    for mp in construct.motif_positions:
+        positions.update(mp.strand1_positions)
+        positions.update(mp.strand2_positions)
+    # Primer positions
+    positions.update(range(p5_len))
+    positions.update(range(len(construct.sequence) - p3_len, len(construct.sequence)))
+    return positions
+
+
 def _generate_candidate_batch(
     config: LibraryConfig,
     motifs: list[Motif],
@@ -539,6 +594,12 @@ def _generate_candidate_batch(
     Returns:
         List of valid candidate constructs.
     """
+    import logging
+
+    logging.basicConfig(level=logging.CRITICAL)
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(logging.CRITICAL),
+    )
     generator = LibraryGenerator(config, motifs, seed=seed, filter_motifs=False)
     return generator._generate_candidates(batch_size, max_attempts)
 

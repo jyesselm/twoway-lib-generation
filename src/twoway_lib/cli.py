@@ -248,7 +248,7 @@ def generate(
             )
             log.info("Saved detailed summary", path=str(detailed_summary))
 
-        _print_summary(constructs)
+        _print_summary(constructs, total_motifs=len(motifs))
         log_collector.save()
 
     except Exception as e:
@@ -485,7 +485,8 @@ def predict_structures(
     results = predict_motif_structures(entries, num_contexts, helix_length, seed)
     save_predicted_motifs_csv(results, output)
 
-    _print_predict_summary(results, output)
+    removed = len(entries) - len(results)
+    _print_predict_summary(results, output, total_input=len(entries))
 
 
 # ---------------------------------------------------------------------------
@@ -722,14 +723,18 @@ def _print_config_summary(config) -> None:
         print(f"  Target motif usage: {config.optimization.target_motif_usage}")
 
 
-def _print_predict_summary(results: list, output: Path) -> None:
+def _print_predict_summary(
+    results: list, output: Path, total_input: int = 0
+) -> None:
     """Print predict-structures summary to stdout.
 
     Args:
         results: List of PredictedMotifResult objects.
         output: Path where the CSV was written.
+        total_input: Total motifs loaded before filtering.
     """
     total = len(results)
+    removed = total_input - total if total_input else 0
     matching = sum(1 for r in results if r.match_fraction == 1.0)
     differing = total - matching
     avg_agreement = (
@@ -739,14 +744,16 @@ def _print_predict_summary(results: list, output: Path) -> None:
     print("=" * 70)
     print("SUMMARY")
     print("=" * 70)
-    print(f"Total motifs processed:        {total}")
+    if removed > 0:
+        print(f"Removed (bad predictions):     {removed}")
+    print(f"Motifs output:                 {total}")
     print(f"Structure matches PDB:         {matching}")
     print(f"Structure differs from PDB:    {differing}")
     print(f"Average consensus agreement:   {avg_agreement:.1%}")
     print(f"Output written to:             {output}")
 
 
-def _print_summary(constructs: list) -> None:
+def _print_summary(constructs: list, total_motifs: int = 0) -> None:
     """Print generation summary."""
     lib_summary = get_library_summary(constructs)
     print()
@@ -757,12 +764,21 @@ def _print_summary(constructs: list) -> None:
             f"  Length range: {lib_summary['length_min']}-{lib_summary['length_max']} nt"
         )
         print(f"  Average length: {lib_summary['length_mean']:.1f} nt")
-        print(f"  Unique motifs used: {lib_summary['unique_motifs_used']}")
+        used = lib_summary['unique_motifs_used']
+        motifs_str = f"  Motifs used: {used}/{total_motifs}" if total_motifs else f"  Motifs used: {used}"
+        unused = total_motifs - used if total_motifs else 0
+        if unused > 0:
+            motifs_str += f" ({unused} unused)"
+        print(motifs_str)
+        per_motif = lib_summary.get('per_motif_usage', {})
+        below_min = sum(1 for v in per_motif.values() if v < 3) if per_motif else 0
         print(
             f"  Motif usage range: {lib_summary['motif_usage_min']}-"
             f"{lib_summary['motif_usage_max']} "
             f"(avg: {lib_summary['motif_usage_mean']:.1f})"
         )
+        if below_min > 0:
+            print(f"  Motifs below 3 uses: {below_min}")
         print(f"  Average edit distance: {lib_summary['avg_edit_distance']:.1f}")
 
 

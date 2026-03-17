@@ -281,8 +281,82 @@ def predict_motif_structures(
             )
         )
 
-    logger.info("Structure prediction complete", total=len(results))
-    return results
+    # Filter out invalid predicted structures
+    kept = []
+    helix_only = []
+    unpaired_ends = []
+    for r in results:
+        if _is_pure_helix(r.predicted_structure):
+            helix_only.append(r)
+        elif _has_unpaired_ends(r.predicted_structure):
+            unpaired_ends.append(r)
+        else:
+            kept.append(r)
+
+    if helix_only:
+        logger.warning(
+            "Removed motifs predicted as pure helix (no internal loops/bulges)",
+            removed=len(helix_only),
+        )
+        for r in helix_only:
+            logger.warning(
+                "Pure helix motif removed",
+                motif_id=r.motif_id,
+                sequence=r.sequence,
+                predicted=r.predicted_structure,
+            )
+
+    if unpaired_ends:
+        logger.warning(
+            "Removed motifs with unpaired flanking positions",
+            removed=len(unpaired_ends),
+        )
+        for r in unpaired_ends:
+            logger.warning(
+                "Unpaired ends motif removed",
+                motif_id=r.motif_id,
+                sequence=r.sequence,
+                predicted=r.predicted_structure,
+            )
+
+    total_removed = len(helix_only) + len(unpaired_ends)
+    logger.info(
+        "Structure prediction complete",
+        total=len(kept),
+        removed_helix=len(helix_only),
+        removed_unpaired_ends=len(unpaired_ends),
+    )
+    return kept
+
+
+def _is_pure_helix(structure: str) -> bool:
+    """Check if a predicted structure is all paired with no dots.
+
+    Args:
+        structure: Structure string with & separator.
+
+    Returns:
+        True if structure contains only '(' , ')' and '&' (no dots).
+    """
+    return "." not in structure
+
+
+def _has_unpaired_ends(structure: str) -> bool:
+    """Check if either strand has unpaired dots at its ends.
+
+    The flanking positions must be paired to connect the motif to
+    adjacent helices. Dots on the ends mean ViennaRNA doesn't predict
+    the closing base pair.
+
+    Args:
+        structure: Structure string with & separator.
+
+    Returns:
+        True if any strand starts or ends with '.'.
+    """
+    parts = structure.split("&")
+    s1, s2 = parts[0], parts[1]
+    return s1[0] == "." or s1[-1] == "." or s2[0] == "." or s2[-1] == "."
 
 
 def _build_pair_table(structure: str) -> list[int]:

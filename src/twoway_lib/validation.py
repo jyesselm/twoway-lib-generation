@@ -319,6 +319,81 @@ def _walk_helix_gc_runs(
     return gc_runs
 
 
+def find_gc_pair_runs_with_positions(
+    sequence: str, structure: str
+) -> list[tuple[set[int], int]]:
+    """Find consecutive GC/CG pair runs with their nucleotide positions.
+
+    Args:
+        sequence: RNA sequence.
+        structure: Dot-bracket secondary structure.
+
+    Returns:
+        List of (positions, run_length) tuples. Positions is a set of
+        all nucleotide indices involved in the run (both strands).
+    """
+    if len(sequence) != len(structure):
+        return []
+
+    ss = SecStruct(sequence, structure)
+    pairs = []
+    for i in range(len(ss)):
+        if ss.is_paired(i):
+            _, partner = ss.get_basepair(i)
+            pairs.append(partner)
+        else:
+            pairs.append(-1)
+
+    runs: list[tuple[set[int], int]] = []
+    visited: set[int] = set()
+
+    for i, j in enumerate(pairs):
+        if j == -1 or i in visited or i > j:
+            continue
+        helix_runs = _walk_helix_gc_runs_with_positions(i, pairs, sequence, visited)
+        runs.extend(helix_runs)
+
+    return runs
+
+
+def _walk_helix_gc_runs_with_positions(
+    start: int,
+    pairs: list[int],
+    sequence: str,
+    visited: set[int],
+) -> list[tuple[set[int], int]]:
+    """Walk a helix and return GC pair runs with their positions."""
+    runs: list[tuple[set[int], int]] = []
+    run_length = 0
+    run_positions: set[int] = set()
+    pos = start
+
+    while pos < len(pairs) and pairs[pos] != -1:
+        partner = pairs[pos]
+        if partner < pos:
+            break
+        nt1 = sequence[pos].upper()
+        nt2 = sequence[partner].upper()
+        if (nt1 == "G" and nt2 == "C") or (nt1 == "C" and nt2 == "G"):
+            run_length += 1
+            run_positions.update((pos, partner))
+            visited.add(pos)
+            visited.add(partner)
+        else:
+            if run_length > 0:
+                runs.append((run_positions, run_length))
+            run_length = 0
+            run_positions = set()
+        if pos + 1 < len(pairs) and pairs[pos + 1] == partner - 1:
+            pos += 1
+        else:
+            break
+
+    if run_length > 0:
+        runs.append((run_positions, run_length))
+    return runs
+
+
 def _build_test_construct(
     motif: "Motif",
     helix_length: int,
