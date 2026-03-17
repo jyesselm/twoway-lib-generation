@@ -4,22 +4,74 @@ import json
 from pathlib import Path
 from typing import Any
 
+import structlog
+
 from twoway_lib.construct import Construct
-from twoway_lib.diversity import calculate_diversity_score
+from twoway_lib.diversity import calculate_diversity_score, edit_distance
+
+logger = structlog.get_logger(__name__)
 
 
 def save_library_json(constructs: list[Construct], path: Path | str) -> None:
     """
-    Save library to JSON file.
+    Save library to JSON file with per-construct metrics.
+
+    Computes ensemble defect (ViennaRNA) and minimum Hamming distance
+    to any other construct in the library for each construct.
 
     Args:
         constructs: List of constructs to save.
         path: Output file path.
     """
     path = Path(path)
-    data = [format_construct_dict(c, i) for i, c in enumerate(constructs)]
+    if not constructs:
+        with open(path, "w") as f:
+            json.dump([], f)
+        return
+
+    logger.info("Computing per-construct metrics", count=len(constructs))
+    ens_defects = _compute_ensemble_defects(constructs)
+    min_distances = _compute_min_distances(constructs)
+
+    data = []
+    for i, c in enumerate(constructs):
+        d = format_construct_dict(c, i)
+        d["ensemble_defect"] = round(ens_defects[i], 2)
+        d["min_hamming_distance"] = min_distances[i]
+        data.append(d)
+
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
+
+
+def _compute_ensemble_defects(constructs: list[Construct]) -> list[float]:
+    """Compute ensemble defect for each construct via ViennaRNA."""
+    from twoway_lib.validation import fold_sequence
+
+    defects = []
+    for i, c in enumerate(constructs):
+        if i % 100 == 0 and i > 0:
+            logger.info("Computing ensemble defects", progress=f"{i}/{len(constructs)}")
+        fr = fold_sequence(c.sequence)
+        defects.append(fr.ensemble_defect)
+    return defects
+
+
+def _compute_min_distances(constructs: list[Construct]) -> list[int]:
+    """Compute minimum edit distance to any other construct for each."""
+    sequences = [c.sequence for c in constructs]
+    n = len(sequences)
+    min_dists = [999999] * n
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = edit_distance(sequences[i], sequences[j])
+            if d < min_dists[i]:
+                min_dists[i] = d
+            if d < min_dists[j]:
+                min_dists[j] = d
+
+    return min_dists
 
 
 def load_library_json(path: Path | str) -> list[dict]:

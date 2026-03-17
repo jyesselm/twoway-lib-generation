@@ -537,6 +537,10 @@ def _has_non_motif_gc_runs(
     the fixed p5/p3 primer regions are allowed. Only runs that extend
     into helix regions are flagged.
 
+    Uses a fast-path: first does a cheap check on the core region
+    (excluding p5/p3). If no long GC runs exist at all, skip the
+    expensive motif-position analysis.
+
     Args:
         construct: Construct to check.
         max_count: Maximum allowed consecutive GC pairs.
@@ -546,8 +550,20 @@ def _has_non_motif_gc_runs(
     Returns:
         True if there are violating GC runs outside motifs.
     """
-    from twoway_lib.validation import find_gc_pair_runs_with_positions
+    from twoway_lib.validation import (
+        find_gc_pair_runs_with_positions,
+        has_consecutive_gc_pairs,
+    )
 
+    # Fast path: check core region (exclude primers). If no long GC runs
+    # exist at all, we can skip the expensive motif-position check.
+    end = len(construct.sequence) - p3_len
+    core_seq = construct.sequence[p5_len:end]
+    core_ss = construct.structure[p5_len:end]
+    if not has_consecutive_gc_pairs(core_seq, core_ss, max_count):
+        return False
+
+    # Slow path: there are long GC runs, check if they're inside motifs
     runs = find_gc_pair_runs_with_positions(construct.sequence, construct.structure)
     allowed = _get_allowed_positions(construct, p5_len, p3_len)
 
