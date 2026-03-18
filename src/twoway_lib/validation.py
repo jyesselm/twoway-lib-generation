@@ -33,7 +33,7 @@ class ValidationResult:
 
 def fold_sequence(sequence: str) -> FoldResult:
     """
-    Fold an RNA sequence using ViennaRNA.
+    Fold an RNA sequence using ViennaRNA via the vienna module.
 
     Args:
         sequence: RNA sequence to fold.
@@ -41,18 +41,15 @@ def fold_sequence(sequence: str) -> FoldResult:
     Returns:
         FoldResult with predicted structure, MFE, and ensemble defect.
     """
-    import RNA
+    import vienna
 
-    fc = RNA.fold_compound(sequence)
-    structure, mfe = fc.mfe()
-    fc.pf()
-    ensemble_defect = fc.ensemble_defect(structure)
+    result = vienna.fold(sequence)
 
     return FoldResult(
         sequence=sequence,
-        predicted_structure=structure,
-        mfe=mfe,
-        ensemble_defect=ensemble_defect,
+        predicted_structure=result.dot_bracket,
+        mfe=result.mfe,
+        ensemble_defect=result.ens_defect,
     )
 
 

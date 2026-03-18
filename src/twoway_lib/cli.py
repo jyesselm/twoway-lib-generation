@@ -169,6 +169,10 @@ def generate(
         Path | None,
         typer.Option("--detailed-summary", help="Save detailed summary to JSON file"),
     ] = None,
+    motif_usage: Annotated[
+        Path | None,
+        typer.Option("--motif-usage", help="Save per-motif usage breakdown to CSV"),
+    ] = None,
 ) -> None:
     """
     Generate a two-way junction library.
@@ -247,6 +251,12 @@ def generate(
                 motif_test_results=test_result_dicts,
             )
             log.info("Saved detailed summary", path=str(detailed_summary))
+
+        if motif_usage:
+            from twoway_lib.io import save_motif_usage_csv
+
+            save_motif_usage_csv(constructs, str(motif_usage), all_motifs=motifs)
+            log.info("Saved motif usage", path=str(motif_usage))
 
         _print_summary(constructs, total_motifs=len(motifs))
         log_collector.save()

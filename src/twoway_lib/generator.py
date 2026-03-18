@@ -363,6 +363,7 @@ class LibraryGenerator:
         min_h, max_h = self.config.effective_helix_length_range
 
         assert self.config.hairpin_loop_length is not None
+        extra_bp = self.config.first_helix_extra_bp
         budget = compute_helix_budget(
             target_length=target,
             motif_lengths=motif_lengths,
@@ -375,6 +376,8 @@ class LibraryGenerator:
         if budget is None:
             return None
 
+        # Reserve extra bp for the first helix before distributing
+        budget -= extra_bp
         assignment = random_helix_assignment(
             budget,
             num_helices,
@@ -384,6 +387,10 @@ class LibraryGenerator:
         )
         if assignment is None:
             return None
+
+        # Add extra bp back to the first helix
+        if extra_bp > 0:
+            assignment = (assignment[0] + extra_bp,) + assignment[1:]
 
         helices = self._generate_variable_helices(assignment)
 
@@ -671,10 +678,14 @@ def estimate_feasible_lengths(
     spacer_5p = config.spacer_5p_length
     spacer_3p = config.spacer_3p_length
 
+    extra = config.first_helix_extra_bp
+    min_helices = [min_h + extra] + [min_h] * min_n
+    max_helices = [max_h + extra] + [max_h] * max_n
+
     min_total = calculate_construct_length(
         min_n,
         [min_motif] * min_n,
-        min_h,
+        min_helices,
         hairpin_len,
         p5_len,
         p3_len,
@@ -684,7 +695,7 @@ def estimate_feasible_lengths(
     max_total = calculate_construct_length(
         max_n,
         [max_motif] * max_n,
-        max_h,
+        max_helices,
         hairpin_len,
         p5_len,
         p3_len,

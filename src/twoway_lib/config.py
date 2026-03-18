@@ -63,6 +63,7 @@ class LibraryConfig:
     spacer_5p_structure: str | None = None
     spacer_3p_sequence: str | None = None  # Linker between last helix and p3
     spacer_3p_structure: str | None = None
+    first_helix_extra_bp: int = 0  # Extra base pairs added to the first helix
     validation: ValidationConfig = field(default_factory=ValidationConfig)
     optimization: OptimizationConfig = field(default_factory=OptimizationConfig)
 
@@ -199,6 +200,7 @@ def _parse_config_dict(data: dict[str, Any]) -> LibraryConfig:
         spacer_5p_structure=data.get("spacer_5p_structure"),
         spacer_3p_sequence=data.get("spacer_3p_sequence"),
         spacer_3p_structure=data.get("spacer_3p_structure"),
+        first_helix_extra_bp=data.get("first_helix_extra_bp", 0),
         validation=validation,
         optimization=optimization,
     )
@@ -281,6 +283,8 @@ def _validate_lengths(config: LibraryConfig) -> None:
     if config.helix_length < 1:
         raise ValueError("helix_length must be >= 1")
     _validate_helix_range(config)
+    if config.first_helix_extra_bp < 0:
+        raise ValueError("first_helix_extra_bp must be >= 0")
     if config.hairpin_loop_length is not None and config.hairpin_loop_length < 3:
         raise ValueError("hairpin_loop_length must be >= 3")
 
@@ -658,6 +662,8 @@ def _add_optional_fields(data: dict[str, Any], config: LibraryConfig) -> None:
         val = getattr(config, attr)
         if val is not None:
             data[attr] = val
+    if config.first_helix_extra_bp > 0:
+        data["first_helix_extra_bp"] = config.first_helix_extra_bp
 
 
 def _validation_config_to_dict(config: ValidationConfig) -> dict[str, Any]:

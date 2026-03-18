@@ -13,8 +13,8 @@ motifs_per_construct:
 # You can also use p5_name and p3_name to reference by name:
 #   p5_name: "cloud_lab_remake_rev_seq"
 #   p3_name: "tail"
-p5_sequence: "GGGCGAAAGCCC"
-p5_structure: "((((....))))"
+p5_sequence: "GGGCGAAAGCCCA"
+p5_structure: "((((....))))."
 
 p3_sequence: "ACAAAGAAACAACAACAACAAC"
 p3_structure: "......................"
@@ -33,6 +33,9 @@ allow_wobble_pairs: true  # Allow G-U/U-G wobble pairs in helices
 # happen to produce the right total with fixed helix_length are feasible.
 helix_length_min: 3
 helix_length_max: 5
+
+# Extra base pairs on the first helix (between p5 and first motif)
+first_helix_extra_bp: 2
 
 # Require GU wobble pair in helices of this length or longer (optional)
 # gu_required_above_length: 4

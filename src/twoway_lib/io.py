@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import structlog
 
 from twoway_lib.construct import Construct
@@ -276,3 +277,45 @@ def save_detailed_summary(
 
     with open(path, "w") as f:
         json.dump(output, f, indent=2)
+
+
+def save_motif_usage_csv(
+    constructs: list[Construct],
+    path: Path | str,
+    all_motifs: list | None = None,
+) -> None:
+    """Save per-motif usage breakdown to a CSV file.
+
+    Columns: sequence, structure, count. Includes motifs with zero usage
+    when all_motifs is provided.
+
+    Args:
+        constructs: List of constructs in the library.
+        path: Output CSV file path.
+        all_motifs: Optional list of all available Motif objects.
+    """
+    motif_counts: dict[str, dict[str, int | str]] = {}
+
+    # Seed with all motifs at count 0
+    if all_motifs:
+        for m in all_motifs:
+            if m.sequence not in motif_counts:
+                motif_counts[m.sequence] = {
+                    "sequence": m.sequence,
+                    "structure": m.structure,
+                    "count": 0,
+                }
+
+    for c in constructs:
+        for m in c.motifs:
+            if m.sequence not in motif_counts:
+                motif_counts[m.sequence] = {
+                    "sequence": m.sequence,
+                    "structure": m.structure,
+                    "count": 0,
+                }
+            motif_counts[m.sequence]["count"] += 1  # type: ignore[operator]
+
+    rows = sorted(motif_counts.values(), key=lambda r: r["count"], reverse=True)
+    df = pd.DataFrame(rows)
+    df.to_csv(path, index=False)
